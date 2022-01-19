@@ -5,7 +5,7 @@ if [ "$(uci -q get network.omrvpn)" = "" ]; then
 		delete network.glorytun
 		delete network.omrvpn
 		set network.omrvpn=interface
-		set network.omrvpn.ifname=tun0
+		set network.omrvpn.device=tun0
 		set network.omrvpn.proto=dhcp
 		set network.omrvpn.ip4table=vpn
 		set network.omrvpn.multipath=off
@@ -137,7 +137,7 @@ if [ "$(uci -q get glorytun-udp.vpn.key)" = "" ] && [ "$(uci -q get glorytun.vpn
 		set glorytun-udp.vpn.key=$(uci -q get glorytun.vpn.key)
 		set glorytun-udp.vpn.host=$(uci -q get glorytun.vpn.host)
 	EOF
-	if [ "$(uci -q get glorytun-udp.vpn.proto)" = "udp" ]; then
+	if [ "$(uci -q get glorytun.vpn.proto)" = "udp" ]; then
 		uci -q batch <<-EOF >/dev/null
 			set glorytun-udp.vpn.enable=1
 			set glorytun.vpn.enable=0

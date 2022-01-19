@@ -5,11 +5,16 @@ if [ "$(uci -q get omr-tracker.omrvpn)" = "" ]; then
 		delete omr-tracker.glorytun
 		set omr-tracker.omrvpn=interface
 		set omr-tracker.omrvpn.type="none"
-		set omr-tracker.omrvpn.timeout=6
-		set omr-tracker.omrvpn.tries=2
-		set omr-tracker.omrvpn.interval=4
+		set omr-tracker.omrvpn.timeout=10
+		set omr-tracker.omrvpn.tries=3
+		set omr-tracker.omrvpn.interval=5
 		set omr-tracker.omrvpn.mail_alert=0
 		set omr-tracker.omrvpn.enabled=1
+		set omr-tracker.omrvpn.wait-test=0
+		set omr-tracker.omrvpn.server_http_test=1
+		set omr-tracker.omrvpn.restart_down=0
+		add_list omr-tracker.omrvpn.hosts='4.2.2.1'
+		add_list omr-tracker.omrvpn.hosts='8.8.8.8'
 		commit omr-tracker
 	EOF
 fi

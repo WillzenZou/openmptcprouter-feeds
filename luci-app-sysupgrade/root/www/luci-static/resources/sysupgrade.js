@@ -1,3 +1,4 @@
+'require ui';
 function $(s) {
     return document.getElementById(s.substring(1));
 }
@@ -64,7 +65,8 @@ function setup() {
     ubus_call("system", "board", {}, "release");
     ubus_call("system", "board", {}, "board_name");
     ubus_call("system", "info", {}, "memory");
-    ubus_call("openmptcprouter", "rootfs", {}, "format");
+    ubus_call("openmptcprouter", "getrootfs", {}, "format");
+    ubus_call("openmptcprouter", "getefi", {}, "efi_enabled");
     uci_get({
         "config": "sysupgrade",
         "section": "server",
@@ -97,7 +99,7 @@ function setup_ready() {
             upgrade_check();
         } else {
             show("#upgrade_button");
-            show("#server_div");
+            //show("#server_div");
             $("#server").value = data.url;
         }
     }
@@ -161,8 +163,8 @@ function upgrade_check() {
     var candidates = []
     hide("#status_box");
     hide("#server_div");
-    set_status("info", "Searching for upgrades", true);
-    fetch(data.url + "/api/versions")
+    set_status("info", _("Searching for upgrades"), true);
+    fetch(data.url + "/api/versions?v=" + Date.now())
         .then(response => response.json())
         .then(response => {
             var branches = response["branches"]
@@ -188,7 +190,7 @@ function upgrade_check() {
 
             if (candidates.length > 0) {
                 var info_output = "<h3>New release <b>" + candidates[0].latest + "</b> available</h3>"
-                info_output += "Installed version: " + data.release.version
+                info_output += _('Installed version:') + " " + data.release.version
 
                 // tell server the currently installed version
                 request_dict.current_version = request_dict.version;
@@ -205,13 +207,13 @@ function upgrade_check() {
                     show("#edit_button");
                 }
                 var upgrade_button = $("#upgrade_button")
-                upgrade_button.value = "Request firmware";
+                upgrade_button.value = _("Request firmware");
                 upgrade_button.style.display = "block";
                 upgrade_button.disabled = false;
                 upgrade_button.onclick = upgrade_request;
 
             } else {
-                set_status("success", "No upgrades available")
+                set_status("success", _("No upgrades available"))
 
             }
         });
@@ -230,6 +232,7 @@ function upgrade_request() {
     request_dict.target = data.release.target
     request_dict.profile = data.board_name
     request_dict.rootfs = data.format
+    request_dict.efi = data.efi_enabled
 
     if (data.edit_packages == true) {
         request_dict.packages = $("#edit_packages").value.split("\n")
@@ -249,7 +252,7 @@ function upgrade_request_callback(response) {
     }
     if (sysupgrade_file != "") {
         data.sysupgrade_url = data.url + '/release/' + response.bin_dir + '/' + sysupgrade_file
-        var info_output = '<h3>Firmware created</h3><p>Created file: <a href="' + data.sysupgrade_url + '">' + sysupgrade_file + '</p></a>'
+        var info_output = '<h3>Firmware searched</h3><p>File: <a href="' + data.sysupgrade_url + '">' + sysupgrade_file + '</p></a>'
         set_status("success", info_output, false, true);
 
         show("#keep_container");
@@ -259,13 +262,13 @@ function upgrade_request_callback(response) {
         upgrade_button.value = "Flash firmware";
         upgrade_button.onclick = download_image;
     } else {
-        set_status("danger", "Firmware build successfull but device not sysupgrade compatible!")
+        set_status("danger", "Device not sysupgrade compatible!")
     }
 }
 
 function flash_image() {
     // Flash image via rpc-sys upgrade_start
-    set_status("warning", "Flashing firmware. Don't unpower device", true)
+    set_status("warning", _("Flashing firmware. Don't unpower device"), true)
     ubus_call("rpc-sys", "upgrade_start", {
         "keep": $("#keep").checked
     }, 'message');
@@ -281,11 +284,11 @@ function ping_ubus() {
         var request = new XMLHttpRequest();
         request.open("GET", ubus_url, true);
         request.addEventListener('error', function(event) {
-            set_status("warning", "Rebooting device - please wait!", true);
+            set_status("warning", _("Rebooting device - please wait!"), true);
             setTimeout(ping_ubus, 5000)
         });
         request.addEventListener('load', function(event) {
-            set_status("success", "Success! Please reload web interface");
+            set_status("success", _("Success! Please reload web interface"));
             $("#upgrade_button").value = "Reload page";
             show("#upgrade_button");
             $("#upgrade_button").disabled = false;
@@ -295,13 +298,13 @@ function ping_ubus() {
         });
         request.send();
     } else {
-        set_status("danger", "Web interface could not reconnect to your device. Please reload web interface or check device manually")
+        set_status("danger", _("Web interface could not reconnect to your device. Please reload web interface or check device manually"))
     }
 }
 
 function upload_image(blob) {
     // Uploads received blob data to the server using cgi-io
-    set_status("info", "Uploading firmware to device", true);
+    set_status("info", _("Uploading firmware to device"), true);
     var request = new XMLHttpRequest();
     var form_data = new FormData();
 
@@ -316,7 +319,7 @@ function upload_image(blob) {
     });
 
     request.addEventListener('error', function(event) {
-        set_status("danger", "Upload of firmware failed, please retry by reloading web interface")
+        set_status("danger", _("Upload of firmware failed, please retry by reloading web interface"))
     });
 
     request.open('POST', origin + '/cgi-bin/cgi-upload');
@@ -340,12 +343,12 @@ function download_image() {
             upload_image(blob)
         }
     };
-    set_status("info", "Downloading firmware to web browser memory", true);
+    set_status("info", _("Downloading firmware to web browser memory"), true);
     download_request.send();
 }
 
 function server_request() {
-    fetch(data.url + "/api/build", {
+    fetch(data.url + "/api/build?v=" + Date.now(), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

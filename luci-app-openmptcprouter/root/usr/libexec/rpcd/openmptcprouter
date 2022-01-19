@@ -11,7 +11,7 @@ local jsonc  = require "luci.jsonc"
 function interface_from_device(dev)
 	for _, iface in ipairs(net:get_networks()) do
 		local ifacen = iface:name()
-		local ifacename = ucic:get("network",ifacen,"ifname")
+		local ifacename = ucic:get("network",ifacen,"device")
 		if ifacename == dev then
 			return ifacen
 		end
@@ -72,7 +72,7 @@ function add_interface(add_interface_ifname)
 	end
 
 	ucic:set("network","wan" .. i,"interface")
-	ucic:set("network","wan" .. i,"ifname",defif)
+	ucic:set("network","wan" .. i,"device",defif)
 	ucic:set("network","wan" .. i,"proto","static")
 	if ointf ~= "" then
 		ucic:set("network","wan" .. i,"type","macvlan")
@@ -128,7 +128,7 @@ end
 
 function remove_interface(intf)
 	-- Remove existing interface
-	local defif = ucic:get("network",intf,"ifname")
+	local defif = ucic:get("network",intf,"device")
 	ucic:delete("network",intf)
 	ucic:delete("network",intf .. "_dev")
 	ucic:save("network")
@@ -170,7 +170,7 @@ function set_interface(intf,proto,ipaddr,netmask,gateway,sqmenabled,downloadspee
 	if not ucic:get("sqm",intf) ~= "" then
 		local defif = get_device(intf)
 		if defif == "" then
-			defif = ucic:get("network",intf,"ifname") or ""
+			defif = ucic:get("network",intf,"device") or ""
 		end
 		ucic:set("sqm",intf,"queue")
 		ucic:set("sqm",intf,"interface",defif)
@@ -268,7 +268,7 @@ function default_vpn(default_vpn)
 		ucic:set("network","omrvpn","proto","dhcp")
 	end
 	if vpn_intf ~= "" then
-		ucic:set("network","omrvpn","ifname",vpn_intf)
+		ucic:set("network","omrvpn","device",vpn_intf)
 		ucic:save("network")
 		ucic:commit("network")
 	end
@@ -535,7 +535,8 @@ function update_vps()
 	local vpsgettoken = sys.exec("/etc/init.d/openmptcprouter-vps restart >/dev/null 2>/dev/null")
 	ucic:foreach("openmptcprouter", "server", function(section)
 		local servername = section[".name"]
-		local serverip = section["ip"] or ""
+		local serverips = section["ip"]
+		local serverip = serverips[1]
 		local adminport = section["port"] or "65500"
 		local token = section["token"] or ""
 		if token ~= "" then
@@ -549,6 +550,12 @@ function get_rootfs()
 	local rootfs = {}
 	rootfs['format'] = luci.util.trim(sys.exec("mount | awk 'NR==1{print $5}'"))
 	return rootfs
+end
+
+function get_efi()
+	local efi = {}
+	efi['efi_enabled'] = nixio.fs.access("/sys/firmware/efi")
+	return efi
 end
 
 function get_ip(interface)
@@ -743,7 +750,8 @@ function interfaces_status()
 		mArray.openmptcprouter["service_addr"] = ""
 		ucic:foreach("openmptcprouter", "server", function(s)
 			local serverip = uci:get("openmptcprouter",s[".name"],"ip") or ""
-			if serverip ~= "" then
+			local disabled = uci:get("openmptcprouter",s[".name"],"disabled") or "0"
+			if serverip ~= "" and disabled ~= "1" then
 				mArray.openmptcprouter["service_addr"] = serverip
 			end
 		end)
@@ -761,7 +769,7 @@ function interfaces_status()
 	mArray.openmptcprouter["omr_time"] = os.time()
 	-- dns
 	mArray.openmptcprouter["dns"] = false
-	local timeout = uci:get("openmptcprouter","settings","status_getip_timeout") or "2"
+	local timeout = uci:get("openmptcprouter","settings","status_getip_timeout") or "1"
 	local dns_test = sys.exec("dig +timeout=" .. timeout .. " +tries=1 openmptcprouter.com | grep 'ANSWER: 0'")
 	if dns_test == "" then
 		mArray.openmptcprouter["dns"] = true
@@ -772,7 +780,7 @@ function interfaces_status()
 		mArray.openmptcprouter["ipv6"] = "enabled"
 	end
 
-	mArray.openmptcprouter["ss_addr"] = ""
+	mArray.openmptcprouter["proxy_addr"] = ""
 	--mArray.openmptcprouter["ss_addr6"] = ""
 	mArray.openmptcprouter["wan_addr"] = ""
 	mArray.openmptcprouter["wan_addr6"] = ""
@@ -788,12 +796,12 @@ function interfaces_status()
 		end
 		
 		if uci:get("openmptcprouter","settings","external_check") ~= "0" and mArray.openmptcprouter["dns"] == true then
-			if mArray.openmptcprouter["service_addr_ip"] ~= "" and mArray.openmptcprouter["service_addr_ip"] ~= nil then
+			--if mArray.openmptcprouter["service_addr_ip"] ~= "" and mArray.openmptcprouter["service_addr_ip"] ~= nil then
 				mArray.openmptcprouter["wan_addr"] = ut.trim(sys.exec("curl -4 -s -m " .. timeout .. " " .. check_ipv4_website))
 				if mArray.openmptcprouter["wan_addr"] == "" then
 					mArray.openmptcprouter["wan_addr"] = ut.trim(sys.exec("dig -4 TXT +timeout=" .. timeout .. " +tries=1 +short o-o.myaddr.l.google.com @ns1.google.com | awk -F'\"' '{print $2}'"))
 				end
-			end
+			--end
 			if mArray.openmptcprouter["ipv6"] == "enabled" or ( mArray.openmptcprouter["service_addr_ip6"] ~= "" and mArray.openmptcprouter["service_addr_ip6"] ~= nil) then
 				mArray.openmptcprouter["wan_addr6"] = uci:get("openmptcprouter","omr","public_detected_ipv6") or ""
 				if mArray.openmptcprouter["wan_addr6"] == "" then
@@ -808,15 +816,15 @@ function interfaces_status()
 			mArray.openmptcprouter["external_check"] = false
 		end
 		-- shadowsocksaddr
-		mArray.openmptcprouter["ss_addr"] = uci:get("openmptcprouter","omr","detected_ss_ipv4") or ""
-		if mArray.openmptcprouter["ss_addr"] == "" and mArray.openmptcprouter["service_addr"] ~= "" then
-			tracker_ip = uci:get("shadowsocks-libev","tracker","local_address") or ""
+		mArray.openmptcprouter["proxy_addr"] = uci:get("openmptcprouter","omr","detected_ss_ipv4") or ""
+		if mArray.openmptcprouter["proxy_addr"] == "" and mArray.openmptcprouter["service_addr"] ~= "" then
+			tracker_ip = uci:get("shadowsocks-libev","tracker_sss0","local_address") or ""
 			if tracker_ip ~= "" then
-				local tracker_port = uci:get("shadowsocks-libev","tracker","local_port")
+				local tracker_port = uci:get("shadowsocks-libev","tracker_sss0","local_port")
 				if mArray.openmptcprouter["external_check"] ~= false then
-					mArray.openmptcprouter["ss_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " " .. check_ipv4_website))
-					if mArray.openmptcprouter["ss_addr"] == "" then
-						mArray.openmptcprouter["ss_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " ifconfig.co"))
+					mArray.openmptcprouter["proxy_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " " .. check_ipv4_website))
+					if mArray.openmptcprouter["proxy_addr"] == "" then
+						mArray.openmptcprouter["proxy_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " ifconfig.me"))
 					end
 					--mArray.openmptcprouter["ss_addr6"] = sys.exec("curl -s -6 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m 3 http://ipv6.openmptcprouter.com")
 				end
@@ -836,6 +844,7 @@ function interfaces_status()
 
 	mArray.openmptcprouter["vps_hostname"] = "Server"
 	-- Get VPS info
+	local adminport = ""
 	ucic:foreach("openmptcprouter", "server", function(s)
 		local serverips = uci:get("openmptcprouter",s[".name"],"ip") or { "" }
 		local master = uci:get("openmptcprouter",s[".name"],"master") or "1"
@@ -845,11 +854,11 @@ function interfaces_status()
 				mArray.openmptcprouter["vps_omr_version"] = uci:get("openmptcprouter", s[".name"], "omr_version") or ""
 				mArray.openmptcprouter["vps_kernel"] = uci:get("openmptcprouter",s[".name"],"kernel") or ""
 				mArray.openmptcprouter["vps_machine"] = uci:get("openmptcprouter",s[".name"],"machine") or ""
-				timeout = uci:get("openmptcprouter","settings","status_vps_timeout") or "2"
+				timeout = uci:get("openmptcprouter","settings","status_vps_timeout") or "1"
 				if uci:get("openmptcprouter",s[".name"],"admin_error") == "1" then
 					mArray.openmptcprouter["vps_admin_error"] = true
 				end
-				local adminport = uci:get("openmptcprouter",s[".name"],"port") or "65500"
+				adminport = uci:get("openmptcprouter",s[".name"],"port") or "65500"
 				local token = uci:get("openmptcprouter",s[".name"],"token") or ""
 				if token ~= "" then
 					local vpsinfo_json = ""
@@ -952,7 +961,10 @@ function interfaces_status()
 	if string.find(sys.exec("/usr/bin/pgrep '^(/usr/sbin/)?glorytun(-udp)?$'"), "%d+") or string.find(sys.exec("/usr/bin/pgrep '^(/usr/sbin/)?dsvpn?$'"), "%d+") or string.find(sys.exec("/usr/bin/pgrep '^(/usr/sbin/)?mlvpn?$'"), "%d+") or string.find(sys.exec("/usr/bin/pgrep '^(/usr/sbin/)?openvpn?$'"), "%d+") then
 		mArray.openmptcprouter["tun_service"] = true
 		mArray.openmptcprouter["tun_ip"] = get_ip("omrvpn")
-		local tun_dev = uci:get("network","omrvpn","ifname")
+		local tun_dev = uci:get("network","omrvpn","device")
+		if tun_dev == "" then
+			tun_dev = uci:get("network","omrvpn","ifname")
+		end
 		if tun_dev == "" then
 			tun_dev = get_device("omrvpn")
 		end
@@ -1101,10 +1113,13 @@ function interfaces_status()
 		end
 	end
 
+
+	mArray.openmptcprouter["direct_output"] = false
 	-- overview status
 	mArray.wans = {}
 	mArray.tunnels = {}
 	allintf = {}
+	allmac = {}
 
 	uci:foreach("network", "interface", function (section)
 	    local interface = section[".name"]
@@ -1115,6 +1130,11 @@ function interfaces_status()
 	    local gateway6 = section["ip6gw"] or ""
 	    local multipath = section["multipath"]
 	    local enabled = section["auto"]
+	    local proto = section["proto"] or ""
+	    local ipv6 = section["ipv6"] or "0"
+	    local mac = section ["macaddr"] or ""
+	    local itype = section ["type"] or ""
+	    local state = uci:get("openmptcprouter", interface, "state") or ""
 
 	    --if not ipaddr or not gateway then return end
 	    -- Don't show if0 in the overview
@@ -1122,19 +1142,29 @@ function interfaces_status()
 
 	    local ifname = get_device(interface)
 	    if ifname == "" or ifname == nil then
-		ifname = section["ifname"] or ""
+		ifname = section["device"] or ""
 	    end
 	    --if ifname ~= nil and ifname:match("^tun.*") and interface:match("^ovpn.*") then
 	    --ifname = get_device(interface:sub(5))
 	    --end
 	    
 	    duplicateif = false
-	    if ifname ~= "" and ifname ~= nil then
+	    if ifname ~= "" and ifname ~= nil and not (section["device"] ~= nil and section["device"]:match("^@.*")) then
 		if allintf[ifname] then
 		    connectivity = "ERROR"
 		    duplicateif = true
 		else
 		    allintf[ifname] = true
+		end
+	    end
+
+	    duplicatemac = false
+	    if mac ~= "" and mac ~= nil and not (section["device"] ~= nil and section["device"]:match("^@.*")) and not (ifname ~= nil and ifname:match("%.")) then
+		if allmac[mac] then
+		    connectivity = "ERROR"
+		    duplicatemac = true
+		else
+		    allmac[mac] = true
 		end
 	    end
 
@@ -1144,20 +1174,29 @@ function interfaces_status()
 	    if enabled == "0" then return end
 
 	    local connectivity = "OK"
-	    if ipaddr == "" and ifname ~= nil and ifname ~= "" then
+	    if ipaddr == "" and ifname ~= nil and ifname ~= "" and proto ~= "dhcpv6" then
 		    ipaddr = ut.trim(sys.exec("ip -4 -br addr ls dev " .. ifname .. " | awk -F'[ /]+' '{print $3}' | tr -d '\n'"))
 	    end
-	    if ipaddr == "" and ifname ~= nil and ifname ~= "" then
+	    if ipaddr == "" and ifname ~= nil and ifname ~= "" and proto ~= "dhcpv6" then
 		    ipaddr = ut.trim(sys.exec("ip -4 addr show dev " .. ifname .. " | grep -m 1 inet | awk '{print $2}' | cut -d'/' -s -f1 | tr -d '\n'"))
 	    end
-	    if ip6addr == "" and ifname ~= nil and ifname ~= "" then
+	    if ip6addr == "" and ifname ~= nil and ifname ~= "" and (ipv6 == "1" or ipv6 == "auto") then
 		    ip6addr = ut.trim(sys.exec("ip -6 -br addr ls dev " .. ifname .. " | awk -F'[ /]+' '{print $3}' | tr -d '\n'"))
 	    end
-	    if ip6addr == "" and ifname ~= nil and ifname ~= "" then
+	    if ip6addr == "" and ifname ~= nil and ifname ~= "" and (ipv6 == "1" or ipv6 == "auto") then
 		    ip6addr = ut.trim(sys.exec("ip -6 addr show dev " .. ifname .. " | grep -m 1 inet | awk '{print $2}' | cut -d'/' -s -f1 | tr -d '\n'"))
 	    end
 	    if ipaddr == "" and ip6addr == "" then
 		    connectivity = "ERROR"
+	    else
+		if mArray.openmptcprouter["wan_addr"] == ipaddr then
+		    mArray.openmptcprouter["direct_output"] = true
+		end
+		if mArray.openmptcprouter["ipv6"] == "enabled" or ( mArray.openmptcprouter["service_addr_ip6"] ~= "" and mArray.openmptcprouter["service_addr_ip6"] ~= nil) then
+		    if mArray.openmptcprouter["wan_addr6"] == ip6addr then
+			mArray.openmptcprouter["direct_output"] = true
+		    end
+		end
 	    end
 
 	    local multipath_state = ""
@@ -1194,15 +1233,19 @@ function interfaces_status()
 	    -- Detect WAN gateway status
 	    local gw_ping = "UP"
 	    local gw_ping6 = "UP"
-	    if ifname ~= nil and not (ifname:match("^tun.*") or interface:match("^ovpn.*")) then
-		gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
-		gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
+	    if ifname ~= nil and not (ifname:match("^tun.*") or interface:match("^ovpn.*") or interface:match("^wg.*")) then
+	        if proto ~= "dhcpv6" then
+			gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
+		end
+		if ipv6 == "1" or ipv6 == "auto" then
+			gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
+		end
 	    end
 
-	    if gateway == "" then
+	    if gateway == "" and proto ~= "dhcpv6" then
 		    gateway = get_gateway(interface)
 	    end
-	    if gateway == "" and ifname ~= nil and ifname ~= "" then
+	    if gateway == "" and ifname ~= nil and ifname ~= "" and ipv6 ~= "1" and ipv6 ~= "auto" then
 		    if fs.access("/sys/class/net/" .. ifname) then
 			    gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep kernel | awk '/proto kernel/ {print $1}' | grep -v / | tr -d '\n'"))
 			    if gateway == "" then
@@ -1210,10 +1253,10 @@ function interfaces_status()
 			    end
 		    end
 	    end
-	    if gateway6 == "" then
+	    if gateway6 == "" and (ipv6 == "1" or ipv6 == "auto") then
 		    gateway6 = get_gateway6(interface)
 	    end
-	    if gateway6 == "" and ifname ~= nil and ifname ~= "" then
+	    if gateway6 == "" and ifname ~= nil and ifname ~= "" and (ipv6 == "1" or ipv6 == "auto") then
 		    if fs.access("/sys/class/net/" .. ifname) then
 			    gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep kernel | awk '/proto kernel/ {print $1}' | grep -v / | tr -d '\n'"))
 			    if gateway6 == "" then
@@ -1229,26 +1272,40 @@ function interfaces_status()
 	    if gateway ~= "" or gateway6 ~= "" then
 		    if uci:get("openmptcprouter", "settings", "disablegwping") ~= "1" and connectivity ~= "ERROR" then
 			    if gateway ~= "" then
-				    local gw_ping_test = ut.trim(sys.exec("ping -w 1 -c 1 " .. gateway .. " | grep '100% packet loss'"))
+				    local gw_ping_test = ""
+				    if ifname ~= "" and ifname ~= nil then
+					    gw_ping_test = ut.trim(sys.exec("ping -w 1 -c 1 -B -I " .. ifname .. " " .. gateway .. " | grep '100% packet loss'"))
+				    else
+					    gw_ping_test = ut.trim(sys.exec("ping -w 1 -c 1 " .. gateway .. " | grep '100% packet loss'"))
+				    end
 				    if gw_ping_test ~= "" then
 					    gw_ping = "DOWN"
 					    if connectivity == "OK" then
 						    connectivity = "WARNING"
 					    end
 				    end
+			    else
+				gw_ping = "DOWN"
 			    end
 			    if gateway6 ~= "" then
-				    local gw_ping6_test = ut.trim(sys.exec("ping -w 1 -c 1 " .. gateway6 .. " | grep '100% packet loss'"))
+				    local gw_ping6_test = ""
+				    if ifname ~= "" and ifname ~= nil then
+					    gw_ping6_test = ut.trim(sys.exec("ping -w 1 -c 1 -B -I " .. ifname .. " " .. gateway6 .. " | grep '100% packet loss'"))
+				    else
+					    gw_ping6_test = ut.trim(sys.exec("ping -w 1 -c 1 " .. gateway6 .. " | grep '100% packet loss'"))
+				    end
 				    if gw_ping6_test ~= "" then
 					    gw_ping6 = "DOWN"
 					    if connectivity == "OK" then
 						    connectivity = "WARNING"
 					    end
 				    end
+			    else
+				gw_ping6 = "DOWN"
 			    end
 		    end
-		    if uci:get("openmptcprouter", interface, "manufacturer") == "huawei" then
-			    intfdata = ut.trim(sys.exec("omr-huawei " .. gateway .. " all"))
+		    if uci:get("openmptcprouter", interface, "manufacturer") == "huawei" and ipaddr ~= "" then
+			    intfdata = ut.trim(sys.exec("omr-huawei " .. ipaddr .. " " .. gateway .. " all"))
 			    if intfdata ~= "" then
 				    signal = ut.trim(sys.exec("echo '".. intfdata .. "' | awk -F';' '{print $1}'"))
 				    operator = ut.trim(sys.exec("echo '".. intfdata .. "' | awk -F';' '{print $2}'"))
@@ -1263,7 +1320,7 @@ function interfaces_status()
 	    end
 	    
 	    if ifname ~= "" and ifname ~= nil then
-		    local proto = section['proto']
+		    --local proto = section['proto']
 		    if proto == "qmi" then
 			    local device = section['device']
 			    intfdata = ut.trim(sys.exec("omr-qmi " .. device .. " all"))
@@ -1292,8 +1349,9 @@ function interfaces_status()
 
 	    local latency = ""
 	    local server_ping = ""
+	    local server_http = ""
 	    --if connectivity ~= "ERROR" and ifname ~= "" and gateway ~= "" and gw_ping ~= "DOWN" and ifname ~= nil and mArray.openmptcprouter["service_addr"] ~= "" and ipaddr ~= "" then
-	    if ifname ~= "" and (gateway ~= "" or gateway6 ~= "") and gw_ping ~= "DOWN" and ifname ~= nil and mArray.openmptcprouter["service_addr"] ~= "" and (ipaddr ~= "" or ip6addr ~= "") and connectivity ~= "ERROR" then
+	    if ifname ~= "" and (gateway ~= "" or gateway6 ~= "") and ifname ~= nil and mArray.openmptcprouter["service_addr"] ~= "" and (ipaddr ~= "" or ip6addr ~= "") and connectivity ~= "ERROR" then
 		    local serverip = mArray.openmptcprouter["service_addr"]
 		    if serverip == "127.0.0.1" then
 			    serverip = mArray.openmptcprouter["wan_addr"]
@@ -1310,6 +1368,30 @@ function interfaces_status()
 				    mArray.openmptcprouter["vps_status"] = "UP"
 				    server_ping = "UP"
 				    latency = ut.trim(sys.exec("echo '" .. server_ping_test .. "' | cut -d '/' -s -f5 | cut -d '.' -f1"))
+			    end
+		    end
+		    
+		    if adminport == "" then
+			    adminport = "65500"
+		    end
+		    -- httping disable for now, with -l (ssl) timeout is ignored
+		    if false and server_ping == "UP" and uci:get("openmptcprouter", "settings", "disableserverhttptest") ~= "1" and ipaddr ~= "" and adminport ~= "" then
+			    local server_http_result = ""
+			    local server_http_test = ""
+			    if mArray.openmptcprouter["service_addr_ip"] ~= "" then
+				    server_http_test = sys.exec("httping -l " .. mArray.openmptcprouter["service_addr_ip"] .. ":" .. adminport .. " -y " .. ipaddr .. " -t 1 -c 1")
+				    server_http_result = ut.trim(sys.exec("echo '" .. server_http_test .. "' | grep '100.00% failed'"))
+			    elseif mArray.openmptcprouter["service_addr_ip6"] ~= "" then
+				    server_http_test = sys.exec("httping -l [" .. mArray.openmptcprouter["service_addr_ip6"] .. "]:" .. adminport .. " -y " .. ipaddr .. " -t 1 -c 1")
+				    server_http_result = ut.trim(sys.exec("echo '" .. server_http_test .. "' | grep '100.00% failed'"))
+			    end
+			    if server_http_result ~= "" then
+				    server_http = "DOWN"
+				    if connectivity == "OK" then
+					    connectivity = "WARNING"
+				    end
+			    else
+				    server_http = "UP"
 			    end
 		    end
 	    end
@@ -1330,6 +1412,10 @@ function interfaces_status()
 		    multipath_available = "NO CHECK"
 	    end
 
+	    local zonewan = "NO"
+	    if ut.trim(sys.exec("uci -q get firewall.zone_wan.network | grep '" .. interface .. "'")) ~= "" or interface:match("^wg.*") or interface:match("^ovpn.*") then
+		    zonewan = "OK"
+	    end
 	    
 	    -- Detect if WAN get an IPv6
 	    local ipv6_discover = "NONE"
@@ -1358,22 +1444,31 @@ function interfaces_status()
 	    local publicIP6 = ""
 
 	    if connectivity ~= "ERROR" then
-		    if ifname ~= nil and ifname:match("^tun.*") and interface:match("^ovpn.*") then
+		    if ifname ~= nil and (ifname:match("^tun.*") and interface:match("^ovpn.*")) then
 			    publicIP = uci:get("openmptcprouter",interface:sub(5),"publicip") or ""
-			    if ifname ~= nil and publicIP == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+			    if ifname ~= nil and ipaddr ~= "" and publicIP == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
 				    publicIP = ut.trim(sys.exec("omr-ip-intf " .. get_device(interface:sub(5))))
 			    end
 			    publicIP6 = uci:get("openmptcprouter",interface:sub(5),"publicip6") or ""
-			    if ifname ~= nil and publicIP6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+			    if ifname ~= nil and ip6addr ~= "" and publicIP6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
 				    publicIP6 = ut.trim(sys.exec("omr-ip6-intf " .. get_device(interface:sub(5))))
+			    end
+		    elseif ifname ~= nil and interface:match("^wg.*") then
+			    publicIP = uci:get("openmptcprouter",interface:sub(3),"publicip") or ""
+			    if ifname ~= nil and ipaddr ~= "" and publicIP == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+				    publicIP = ut.trim(sys.exec("omr-ip-intf " .. get_device(interface:sub(3))))
+			    end
+			    publicIP6 = uci:get("openmptcprouter",interface:sub(3),"publicip6") or ""
+			    if ifname ~= nil and ip6addr ~= "" and publicIP6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+				    publicIP6 = ut.trim(sys.exec("omr-ip6-intf " .. get_device(interface:sub(3))))
 			    end
 		    else
 			    publicIP = uci:get("openmptcprouter",interface,"publicip") or ""
-			    if ifname ~= nil and publicIP == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+			    if ifname ~= nil and ipaddr ~= "" and publicIP == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
 				    publicIP = ut.trim(sys.exec("omr-ip-intf " .. ifname))
 			    end
 			    publicIP6 = uci:get("openmptcprouter",interface,"publicip6") or ""
-			    if ifname ~= nil and publicIP6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
+			    if ifname ~= nil and ip6addr ~= ""  and publicIP6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
 				    publicIP6 = ut.trim(sys.exec("omr-ip6-intf " .. ifname))
 			    end
 		    end
@@ -1399,6 +1494,10 @@ function interfaces_status()
 				    end
 			    end
 		    end
+		    loop = false
+		    if uci:get("openmptcprouter", interface, "loop") == "1" then
+			    loop = true
+		    end
 	    end
 	    local rx = ""
 	    local tx = ""
@@ -1406,6 +1505,11 @@ function interfaces_status()
 		    rx = ut.trim(sys.exec("devstatus " .. ifname .. " | jsonfilter -e '@.statistics.rx_bytes'"))
 		    tx = ut.trim(sys.exec("devstatus " .. ifname .. " | jsonfilter -e '@.statistics.tx_bytes'"))
 	    end
+	    
+	    if state == "down" then
+		    connectivity = "ERROR"
+	    end
+	    
 	    local data = {
 		label = section["label"] or interface,
 		name = interface,
@@ -1429,17 +1533,24 @@ function interfaces_status()
 		gw_ping = gw_ping,
 		gw_ping6 = gw_ping6,
 		server_ping = server_ping,
+		server_http = server_http,
 		ipv6_discover = ipv6_discover,
 		multipath_available = multipath_available,
 		multipath_state = current_multipath_state,
 		duplicateif = duplicateif,
+		duplicatemac = duplicatemac,
 		signal = signal,
 		operator = operator,
 		phonenumber = phonenumber,
 		donglestate = donglestate,
 		networktype = networktype,
+		proto = proto,
 		rx = rx,
 		tx = tx,
+		zonewan = zonewan,
+		iftype = itype,
+		state = state,
+		loop = loop,
 	    }
 	    if ifname ~= nil and ifname:match("^tun.*") then
 		    table.insert(mArray.tunnels, data);
@@ -1449,6 +1560,9 @@ function interfaces_status()
 		    table.insert(mArray.wans, data);
 	    end
 	end)
+	if next(mArray.wans) == nil then
+		mArray.openmptcprouter["direct_output"] = true
+	end
 
 	--luci.http.prepare_content("application/json")
 	--luci.http.write_json(mArray)
@@ -1521,6 +1635,11 @@ local methods = {
 	getrootfs = {
 		call = function()
 			return get_rootfs()
+		end
+	},
+	getefi = {
+		call = function()
+			return get_efi()
 		end
 	},
 	status = {
