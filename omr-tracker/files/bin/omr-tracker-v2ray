@@ -27,7 +27,12 @@ _get_ip() {
 		[ -z "$check_ipv4_website" ] && check_ipv4_website="http://ip.openmptcprouter.com"
 		check_ipv6_website="$(uci -q get openmptcprouter.settings.check_ipv6_website)"
 		[ -z "$check_ipv6_website" ] && check_ipv6_website="http://ipv6.openmptcprouter.com"
-		uci -q set openmptcprouter.omr.detected_public_ipv4="$(curl -s -4 -m 3 $check_ipv4_website)"
+		public_ipv4="$(curl -s -4 -m 3 $check_ipv4_website)"
+		uci -q set openmptcprouter.omr.detected_public_ipv4="${public_ipv4}"
+		[ -n "${public_ipv4}" ] && {
+			uci -q set upnpd.config.external_ip="${public_ipv4}"
+			uci -q commit upnpd
+		}
 		if [ "$(uci -q get openmptcprouter.omr.v2ray)" != "down" ]; then
 			uci -q set openmptcprouter.omr.detected_ss_ipv4="$(curl -s -4 --socks5 "${proxy}" --max-time 3 $check_ipv4_website)"
 		else
@@ -70,7 +75,7 @@ while true; do
 			uci -q set openmptcprouter.omr.v2ray="up"
 			uci -q commit openmptcprouter.omr
 		}
-		if [ -z "$(iptables -t nat -L -n | grep v2r)" ]; then
+		if [ -z "$(iptables -w -t nat -L -n | grep v2r)" ]; then
 			_log "Reload V2Ray rules"
 			/etc/init.d/v2ray rules_up 2> /dev/null
 			_get_ip
@@ -81,7 +86,7 @@ while true; do
 		last=$((last + 1 ))
 		[ -z "$nocontact" ] && nocontact="$host" || nocontact="$nocontact, $host"
 		[ "${last}" -ge "${retry}" ] && {
-			if [ -n "$(iptables -t nat -L -n | grep v2r)" ]; then
+			if [ -n "$(iptables -w -t nat -L -n | grep v2r)" ]; then
 				_log "V2Ray is down (can't contact via http ${nocontact})"
 				uci -q set openmptcprouter.omr.v2ray="down"
 				uci -q commit openmptcprouter.omr

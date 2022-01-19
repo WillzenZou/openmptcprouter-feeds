@@ -1,6 +1,6 @@
 #
 # Copyright (C) 2017-2018 Yousong Zhou <yszhou4tech@gmail.com>
-# Copyright (C) 2018-2019 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
+# Copyright (C) 2018-2021 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -14,12 +14,11 @@ include $(TOPDIR)/rules.mk
 # - check if default mode has changed from being tcp_only
 #
 PKG_NAME:=shadowsocks-libev
-PKG_VERSION:=3.3.4
-PKG_RELEASE:=1
-
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://github.com/shadowsocks/shadowsocks-libev/releases/download/v$(PKG_VERSION)
-PKG_HASH:=fce47a956fad0c30def9c71821bcec450a40d3f881548e31e66cedf262b89eb1
+PKG_RELEASE:=11
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/Ysurac/shadowsocks-libev.git
+PKG_SOURCE_VERSION:=410950d87d8cdf8502d8f59a79dc0ff4c7677543
+PKG_VERSION:=3.3.5-$(PKG_SOURCE_VERSION)
 
 PKG_MAINTAINER:=Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 
@@ -57,7 +56,7 @@ define Package/shadowsocks-libev/Default
     SUBMENU:=Web Servers/Proxies
     TITLE:=shadowsocks-libev $(1)
     URL:=https://github.com/shadowsocks/shadowsocks-libev
-    DEPENDS:=+libcares +libev +libmbedtls +libpcre +libpthread +libsodium +shadowsocks-libev-config +zlib +libpcap +libcap +libstdcpp +libelf1
+    DEPENDS:=+libcares +libev +libmbedtls +libpcre +libpthread +libsodium +shadowsocks-libev-config +zlib +libpcap +libcap +libstdcpp +libelf
   endef
 
   define Package/shadowsocks-libev-$(1)/install

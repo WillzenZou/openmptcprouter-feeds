@@ -21,6 +21,31 @@
 		end
 		return true
 	end
+	function splitstring(inputstr, sep)
+		if inputstr == nil then
+			return ""
+		end
+		if sep == nil then
+			sep = "%s"
+		end
+		local t={}
+		for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+			table.insert(t, str)
+		end
+		return t
+	end
+
+	alltty = {}
+	iftty = luci.sys.exec("timeout 1 /usr/bin/mmcli -L")
+	for listtty in iftty:gmatch("([^\r\n]*)[\r\n]") do
+		modemid = luci.util.trim(luci.sys.exec("echo '" .. listtty .. "' | awk -F' ' '{print $1}' | awk -F/ '{print $6}'"))
+		if modemid ~= '' then
+			modeminfo = luci.sys.exec("timeout 1 /usr/bin/mmcli -m " .. modemid .. " --output-keyvalue")
+			tty = luci.util.trim(luci.sys.exec("echo '" .. modeminfo .. "' | grep 'modem.generic.device ' | awk -F': ' '{print $2}'"))
+			table.insert(alltty, tty)
+		end
+	end
+
 
 %>
 <script type="text/javascript" src="<%=resource%>/cbi.js?v=git-18.243.49640-2f13420" data-strings="{&#34;path&#34;:{&#34;resource&#34;:&#34;\/luci-static\/resources&#34;,&#34;browser&#34;:&#34;\/cgi-bin\/luci\/admin\/filebrowser&#34;}}"></script>
@@ -35,7 +60,7 @@
 	}
 </script>
 <% if stderr and #stderr > 0 then %><pre class="error"><%=pcdata(stderr)%></pre><% end %>
-<form class="inline" method="post" action="<%=url('admin/system/' .. menuentry:lower() .. '/wizard_add')%>" enctype="multipart/form-data">
+<form class="inline" method="post" action="<%=url('admin/system/' .. menuentry:lower() .. '/wizard_add')%>" enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
     <div class="cbi-map">
 	<h2 name="content"><%:Wizard%></h2>
 	<fieldset class="cbi-section" id="server">
@@ -54,17 +79,30 @@
 	    </div>
 	    <h3><%=servername%></h3>
 	    <div class="cbi-section-node" id="cbi-omr-wizard-<%=servername%>">
-		<div class="cbi-value">
-		    <label class="cbi-value-title" for="server_ip"><%:Server IP%></label>
+		<div class="cbi-value" id="<%=servername%>.server_ip" data-depends="[{&#34;enableipv6&#34;:&#34;1&#34;}]" data-index="1">
+		    <label class="cbi-value-title" for="server_ip.1"><%:Server IP%></label>
 		    <div class="cbi-value-field">
-			    <input name="<%=servername%>.server_ip" id="<%=servername%>.server_ip" placeholder="<%:Server IP%>" class="cbi-input-text" value="<%=uci:get_list("openmptcprouter",servername,"ip")[1]%>" data-optional="false">
+			    <input name="<%=servername%>.serverip.ip1" id="<%=servername%>.server_ip.1" placeholder="<%:Server IP%>" class="cbi-input-text" value="<%=uci:get_list("openmptcprouter",servername,"ip")[1]%>" data-optional="false">
 			<div class="cbi-value-description">
 			    <%:Server IP will be set for proxy and VPN%>
 			</div>
 		    </div>
 		</div>
+		<div class="cbi-value" id="<%=servername%>.server_ipv6" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;}]" data-index="1">
+		    <label class="cbi-value-title" for="server_ip.1"><%:Server IP%></label>
+		    <div class="cbi-value-field">
+			    <input name="<%=servername%>.serverip.ip1" id="<%=servername%>.server_ip.1" placeholder="<%:Primary server IP%>" class="cbi-input-text" value="<%=uci:get_list("openmptcprouter",servername,"ip")[1]%>" data-optional="false">
+			    <input name="<%=servername%>.serverip.ip2" id="<%=servername%>.server_ip.2" placeholder="<%:Secondary server IP%>" class="cbi-input-text" value="<%=uci:get_list("openmptcprouter",servername,"ip")[2]%>" data-optional="false">
+			<div class="cbi-value-description">
+			    <%:Server IP will be set for proxy and VPN%>
+			</div>
+			<div class="cbi-value-description">
+			    <%:A second server's IP can be set for dual IPv4/IPv6 server if WAN IPv6 are set%>
+			</div>
+		    </div>
+		</div>
 		<br />
-		<div class="cbi-value">
+		<div class="cbi-value" data-index="2">
 		    <label class="cbi-value-title"><%:Server username%></label>
 		    <div class="cbi-value-field">
 			<input type="text" name="<%=servername%>.openmptcprouter_vps_username" placeholder="<%:Server username%>" class="cbi-input-text" value="<%=uci:get("openmptcprouter",servername,"username")%>" data-optional="false">
@@ -74,7 +112,7 @@
 			</div>
 		    </div>
 		</div>
-		<div class="cbi-value">
+		<div class="cbi-value" data-index="3">
 		    <label class="cbi-value-title"><%:Server key%></label>
 		    <div class="cbi-value-field">
 			<input type="text" name="<%=servername%>.openmptcprouter_vps_key" placeholder="<%:Server key%>" class="cbi-input-text" value="<%=uci:get("openmptcprouter",servername,"password")%>" data-optional="false">
@@ -88,10 +126,10 @@
 		    if nbserver > 1 then
 		%>
 		<br />
-		<div class="cbi-value">
+		<div class="cbi-value" data-index="4">
 		    <label class="cbi-value-title"><%:Set server as master%></label>
 		    <div class="cbi-value-field">
-			<input class="cbi-input-radio" type="radio" name="master" value="<%=servername%>" <% if uci:get("openmptcprouter",servername,"master") == "1" then %>checked<% end %>/>
+			<input class="cbi-input-radio" type="radio" name="master" value="<%=servername%>" <% if uci:get("openmptcprouter",servername,"master") == "1" then %>checked <% end %>/>
 			<br />
 			<div class="cbi-value-description">
 			    <%:Only one server can be master, else all servers are set as backup.%>
@@ -102,10 +140,10 @@
 		    end
 	    %>
 		<br />
-		<div class="cbi-value">
+		<div class="cbi-value" data-index="5">
 		    <label class="cbi-value-title"><%:Disable server%></label>
 		    <div class="cbi-value-field">
-			<input class="cbi-input-radio" type="checkbox" name="<%=servername%>.openmptcprouter_vps_disabled" value="1" <% if uci:get("openmptcprouter",servername,"disabled") == "1" then %>checked<% end %>/>
+			<input class="cbi-input-radio" type="checkbox" name="<%=servername%>.openmptcprouter_vps_disabled" value="1" <% if uci:get("openmptcprouter",servername,"disabled") == "1" then %>checked <% end %>/>
 		    </div>
 		</div>
 	    <%
@@ -120,9 +158,9 @@
 	    </div>
 	</fieldset>
 	<fieldset class="cbi-section" id="server_common">
-	    <legend><%:Common server settings%></legend>
+	    <legend><%:Advanced settings%></legend>
 	    <div class="cbi-value">
-		<label class="cbi-value-title"><%:Advanced settings%></label>
+		<label class="cbi-value-title"><%:Show advanced settings%></label>
 		<div class="cbi-value-field">
 		    <input type="checkbox" class="cbi-input-checkbox" id="showadv" value="1" onclick="jsshowadv()" />
 		</div>
@@ -147,7 +185,10 @@
 	    <div class="cbi-value">
 		<label class="cbi-value-title"><%:Enable IPv6%></label>
 		<div class="cbi-value-field">
-		    <input class="cbi-input-checkbox" type="checkbox" id="enableipv6" name="enableipv6" value="0" <% if uci:get("openmptcprouter","settings","disable_ipv6") == "0" then %>checked<% end %> />
+		    <select class="cbi-input-select" name="enableipv6" id="enableipv6" data-update="change" size="1">
+			<option value="1" <% if uci:get("openmptcprouter","settings","disable_ipv6") ~= "0" then %>selected="selected"<% end %>><%:Disabled%></option>
+			<option value="0" <% if uci:get("openmptcprouter","settings","disable_ipv6") == "0" then %>selected="selected"<% end %>><%:Enabled%></option>
+		    </select>
 		    <br />
 		    <div class="cbi-value-description">
 		        <%:You should disable IPv6 here if server doesn't provide IPv6.%>
@@ -161,6 +202,16 @@
 		    <br />
 		    <div class="cbi-value-description">
 		        <%:You can use a public IPv6 prefix only if you set only one server.%>
+		    </div>
+		</div>
+	    </div>
+	    <div class="cbi-value">
+		<label class="cbi-value-title"><%:Enable DNS64%></label>
+		<div class="cbi-value-field">
+		    <input class="cbi-input-checkbox" type="checkbox" name="dns64" value="1" <% if uci:get("openmptcprouter","settings","dns64") == "1" then %>checked <% end %>/>
+		    <br />
+		    <div class="cbi-value-description">
+		        <%:If host support NAT64, you can enable DNS64 support.%>
 		    </div>
 		</div>
 	    </div>
@@ -335,6 +386,41 @@
 		</div>
 	    </div>
 	</fieldset>
+	<fieldset class="cbi-section" id="mptcpovervpn">
+	    <legend><%:MPTCP over VPN settings%></legend>
+	    <div class="cbi-section-descr"><%:MPTCP over VPN should be used only when Multipath TCP is blocked on a connection.%> <%:Only work with Shadowsocks as proxy.%></div>
+	    <div class="cbi-value">
+		<label class="cbi-value-title"><%:MPTCP over VPN%></label>
+		<div class="cbi-value-field">
+		    <select class="cbi-input-select" name="mptcpovervpn_vpn" size="1">
+			<% if nixio.fs.access("/etc/init.d/openvpn") then %><option value="openvpn" <% if uci:get("openmptcprouter","settings","mptcpovervpn") == "openvpn" then %>selected="selected"<% end %>>OpenVPN</option><% end %>
+			<% if nixio.fs.access("/usr/bin/wg") then %><option value="wireguard" <% if uci:get("openmptcprouter","settings","mptcpovervpn") == "wireguard" or uci:get("openmptcprouter","settings","mptcpovervpn") == nil then %>selected="selected"<% end %>>WireGuard</option><% end %>
+		    </select>
+		    <br />
+		    <div class="cbi-value-description">
+		        <%:Set VPN to use for MPTCP over VPN.%>
+		    </div>
+		</div>
+	    </div>
+	</fieldset>
+	<fieldset class="cbi-section" id="country">
+	    <legend><%:Country settings%></legend>
+	    <div class="cbi-section-descr"><%:Set configuration for countries with some specificities.%></div>
+	    <div class="cbi-value">
+		<label class="cbi-value-title"><%:Country%></label>
+		<div class="cbi-value-field">
+		    <select class="cbi-input-select" name="country" size="1">
+			<option value="" <% if uci:get("openmptcprouter","settings","country") == nil then %>selected="selected"<% end %>><%:None%></option>
+			<option value="world" <% if uci:get("openmptcprouter","settings","country") == "world" then %>selected="selected"<% end %>><%:World%></option>
+			<option value="china" <% if uci:get("openmptcprouter","settings","country") == "china" then %>selected="selected"<% end %>><%:China%></option>
+		    </select>
+		    <br />
+		    <div class="cbi-value-description">
+		        <%:For China, set an accessible DNS and disable DNSSEC.%>
+		    </div>
+		</div>
+	    </div>
+	</fieldset>
 	</span>
 	<hr />
 	<fieldset class="cbi-section" id="laninterfaces">
@@ -342,7 +428,7 @@
 <% 
     for _, iface in ipairs(net:get_networks()) do
 	local ifname = iface:name()
-	local firewall_lan = luci.util.trim(luci.sys.exec("uci -q get firewall.@zone[0].network | grep " .. ifname))
+	local firewall_lan = luci.util.trim(luci.sys.exec("uci -q get firewall.zone_lan.network | grep " .. ifname))
 	if firewall_lan ~= "" then
 %>
 	    <h3><%=ifname%></h3>
@@ -384,10 +470,10 @@
 			<%
 			    iffind=0
 			    for _, ifacea in ipairs(ifaces) do
-				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*")) and device_notvirtual(ifacea) then
+				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*") or ifacea:match("^bond.*")) and device_notvirtual(ifacea) then
 				    if uci:get("network",ifname,"proto") ~= "macvlan" then
 			%>
-			<option value="<%=ifacea%>"<% if uci:get("network",ifname,"ifname") == ifacea then iffind = 1 %> selected="selected"<% end %>><%=ifacea%></option>
+			<option value="<%=ifacea%>"<% if uci:get("network",ifname,"device") == ifacea then iffind = 1 %> selected="selected"<% end %>><%=ifacea%></option>
 			<%
 				    else
 			%>
@@ -397,9 +483,9 @@
 				end
 			    end
 			    if uci:get("network",ifname,"proto") ~= "macvlan" then
-				    if iffind == 0 and uci:get("network",ifname,"ifname") ~= nil then
+				    if iffind == 0 and uci:get("network",ifname,"device") ~= nil then
 			%>
-				<option value="<%=uci:get("network",ifname,"ifname")%>" selected="selected"><%=uci:get("network",ifname,"ifname")%></option>
+				<option value="<%=uci:get("network",ifname,"device")%>" selected="selected"><%=uci:get("network",ifname,"device")%></option>
 			<%
 				    end
 			    else
@@ -445,7 +531,7 @@
 <% 
     for _, iface in ipairs(net:get_networks()) do
 	local ifname = iface:name()
-	local firewall_wan = luci.util.trim(luci.sys.exec("uci -q get firewall.@zone[1].network | grep " .. ifname))
+	local firewall_wan = luci.util.trim(luci.sys.exec("uci -q get firewall.zone_wan.network | grep " .. ifname))
 	if firewall_wan ~= "" then
 
 --	local multipath = uci:get("network",ifname,"multipath")
@@ -489,7 +575,7 @@
 			    <select class="cbi-input-select" data-update="change" id="cbid.network.<%=ifname%>.masterintf" name="cbid.network.<%=ifname%>.masterintf" size="1">
 			<%
 			    for _, ifacea in ipairs(ifaces) do
-				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*")) and device_notvirtual(ifacea) then
+				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*") or ifacea:match("^bond.*")) and device_notvirtual(ifacea) then
 			%>
 			<option value="<%=ifacea%>"<% if uci:get("network",ifname,"masterintf") == ifacea then %> selected="selected"<% end %>><%=ifacea%></option>
 			<%
@@ -530,20 +616,32 @@
 			    <select class="cbi-input-select" data-update="change" id="cbid.network.<%=ifname%>.intf" name="cbid.network.<%=ifname%>.intf" size="1">
 			<%
 			    iffind=0
+			    uciifname=uci:get("network",ifname,"device")
+			    if uciifname ~= nil then
+				if uciifname:match("/") then
+				    realifname=uciifname
+				    vlan=""
+				else
+				    realifname=splitstring(uciifname,'.')[1] or ""
+				    vlan=splitstring(uciifname,'.')[2] or ""
+				end
+			    end
 			    for _, ifacea in ipairs(ifaces) do
-				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*")) and device_notvirtual(ifacea) then
+				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*") or ifacea:match("^tun.*") or ifacea:match("^bond.*")) and device_notvirtual(ifacea) then
 			%>
-			<option value="<%=ifacea%>"<% if uci:get("network",ifname,"ifname") == ifacea then iffind = 1 %> selected="selected"<% end %>><%=ifacea%></option>
+				<option value="<%=ifacea%>"<% if realifname == ifacea then iffind = 1 %> selected="selected"<% end %>><%=ifacea%></option>
 			<%
 				end
 			    end
-			    if iffind == 0 and uci:get("network",ifname,"ifname") ~= nil then
+			    if iffind == 0 and uciifname ~= nil then
 			%>
-				<option value="<%=uci:get("network",ifname,"ifname")%>" selected="selected"><%=uci:get("network",ifname,"ifname")%></option>
+				<option value="<%=uciifname%>" selected="selected"><%=uciifname%></option>
 			<%
 			    end
 			%>
 			    </select>
+			<label><%:VLAN%></label>
+			<input type="text" id="cbid.network.<%=ifname%>.vlan" name="cbid.network.<%=ifname%>.vlan" class="cbi-input-text" placeholder="<%:VLAN%>" value="<%=vlan%>" data-optional="true">
 			<br />
 			<div class="cbi-value-description">
 			    <%:Choose physical interface.%>
@@ -584,7 +682,7 @@
 		<div class="cbi-value" id="cbi-network-<%=ifname%>-ipv6address" data-index="8">
 		    <label class="cbi-value-title"><%:IPv6 address%></label>
 		    <div class="cbi-value-field">
-			<input type="text" id="cbid.network.<%=ifname%>.ip6addr" name="cbid.network.<%=ifname%>.ip6addr" class="cbi-input-text" value="<%=value%>" data-type="ip6addr">
+			<input type="text" id="cbid.network.<%=ifname%>.ip6addr" name="cbid.network.<%=ifname%>.ip6addr" class="cbi-input-text" value="<%=value%>" data-type="ip6addr" data-optional="true">
 			<br />
 			<div class="cbi-value-description">
 			    <%:Set an IP in the same network as the modem%>
@@ -598,7 +696,7 @@
 		<div class="cbi-value" id="cbi-network-<%=ifname%>-ip6gw" data-index="9">
 		    <label class="cbi-value-title"><%:IPv6 gateway%></label>
 		    <div class="cbi-value-field">
-			<input type="text" id="cbid.network.<%=ifname%>.ip6gw" name="cbid.network.<%=ifname%>.ip6gw" class="cbi-input-text" value="<%=uci:get("network",ifname,"ip6gw")%>" data-type="ip6addr">
+			<input type="text" id="cbid.network.<%=ifname%>.ip6gw" name="cbid.network.<%=ifname%>.ip6gw" class="cbi-input-text" value="<%=uci:get("network",ifname,"ip6gw")%>" data-type="ip6addr"  data-optional="true">
 			<br />
 			<div class="cbi-value-description">
 			    <%:Set here IP of the modem%>
@@ -608,7 +706,7 @@
 		<%
 		    else
 		%>
-		<div class="cbi-value" id="cbi-network-<%=ifname%>-ipv6address" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;},{&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;static&#34;},{&#34;cbid.network.<%=ifname%>.type&#34;:&#34;macvlan&#34;}]" data-index="8">
+		<div class="cbi-value" id="cbi-network-<%=ifname%>-ipv6address" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;,&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;static&#34;},{&#34;enableipv6&#34;:&#34;0&#34;,&#34;cbid.network.<%=ifname%>.type&#34;:&#34;macvlan&#34;}]" data-index="8">
 		    <label class="cbi-value-title"><%:IPv6 address%></label>
 		    <div class="cbi-value-field">
 			<input type="text" id="cbid.network.<%=ifname%>.ip6addr" name="cbid.network.<%=ifname%>.ip6addr" class="cbi-input-text" value="" data-type="ip6addr">
@@ -618,7 +716,7 @@
 			</div>
 		    </div>
 		</div>
-		<div class="cbi-value" id="cbi-network-<%=ifname%>-ip6gw" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;},{&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;static&#34;},{&#34;cbid.network.<%=ifname%>.type&#34;:&#34;macvlan&#34;}]" data-index="9">
+		<div class="cbi-value" id="cbi-network-<%=ifname%>-ip6gw" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;,&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;static&#34;},{&#34;enableipv6&#34;:&#34;0&#34;,&#34;cbid.network.<%=ifname%>.type&#34;:&#34;macvlan&#34;}]" data-index="9">
 		    <label class="cbi-value-title"><%:IPv6 gateway%></label>
 		    <div class="cbi-value-field">
 			<input type="text" id="cbid.network.<%=ifname%>.ip6gw" name="cbid.network.<%=ifname%>.ip6gw" class="cbi-input-text" value="<%=uci:get("network",ifname,"ip6gw")%>" data-type="ip6addr">
@@ -631,6 +729,14 @@
 		<%
 		    end
 		%>
+		<!--
+		<div class="cbi-value" id="cbi-network-<%=ifname%>-ip6" data-depends="[{&#34;enableipv6&#34;:&#34;0&#34;,&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;static&#34;}]" data-index="10">
+		    <label class="cbi-value-title"><%:Accept IPv6 RA%></label>
+		    <div class="cbi-value-field">
+			<input type="checkbox" id="cbid.network.<%=ifname%>.ipv6" name="cbid.network.<%=ifname%>.ipv6" value="1" <% if uci:get("network",ifname,"ipv6") == "1" then %>checked<% end %> />
+		    </div>
+		</div>
+		-->
 		<div class="cbi-value" id="cbi-network-<%=ifname%>-device-ncm" data-depends="[{&#34;cbid.network.<%=ifname%>.proto&#34;:&#34;ncm&#34;}]" data-index="5">
 		    <label class="cbi-value-title"><%:Device%></label>
 		    <div class="cbi-value-field">
@@ -685,16 +791,10 @@
 			    <select class="cbi-input-select" data-update="change" id="cbid.network.<%=ifname%>.device.modemmanager" name="cbid.network.<%=ifname%>.device.modemmanager" size="1">
 			<%
 			    iffind=0
-			    iftty = luci.sys.exec("/usr/bin/mmcli -L")
-			    for listtty in iftty:gmatch("([^\r\n]*)[\r\n]") do
-				modemid = luci.util.trim(luci.sys.exec("echo '" .. listtty .. "' | awk -F' ' '{print $1}' | awk -F/ '{print $6}'"))
-				if modemid ~= '' then
-				    modeminfo = luci.sys.exec("/usr/bin/mmcli -m " .. modemid .. " --output-keyvalue")
-				    tty = luci.util.trim(luci.sys.exec("echo '" .. modeminfo .. "' | grep 'modem.generic.device ' | awk -F': ' '{print $2}'"))
+			    for _, tty in ipairs(alltty) do
 			%>
 			<option value="<%=tty%>"<% if uci:get("network",ifname,"device") == tty then iffind = 1 %> selected="selected"<% end %>><%=tty%></option>
 			<%
-				end
 			    end
 			    if iffind == 0 and uci:get("network",ifname,"device") ~= nil then
 			%>
@@ -793,6 +893,16 @@
 		<%
 		    end
 		%>
+		<div class="cbi-value" data-index="14">
+		    <label class="cbi-value-title"><%:Force TTL%></label>
+		    <div class="cbi-value-field">
+			<input type="text" name="cbid.network.<%=ifname%>.ttl" class="cbi-input-text" value="<%=ttl%>" data-type="uinteger" data-optional="true">
+			<br />
+			<div class="cbi-value-description">
+			    <%:You can force a TTL. Some LTE provider detect tethering by inpecting packet TTL value, setting it to 65 often solve the issue.%>
+			</div>
+		    </div>
+		</div>
 
 		<%
 			local download = "0"
@@ -809,7 +919,7 @@
 			--	end
 			--end
 		%>
-		<div class="cbi-value" data-index="14">
+		<div class="cbi-value" data-index="15">
 		    <label class="cbi-value-title"><%:MPTCP over VPN%></label>
 		    <div class="cbi-value-field">
 			<input class="cbi-input-checkbox" type="checkbox" name="multipathvpn.<%=ifname%>.enabled" value="1" <% if uci:get("openmptcprouter",ifname,"multipathvpn") == "1" then %>checked<% end %> />
@@ -819,7 +929,7 @@
 			</div>
 		    </div>
 		</div>
-		<div class="cbi-value" data-index="15">
+		<div class="cbi-value" data-index="16">
 		    <label class="cbi-value-title"><%:Enable SQM%></label>
 		    <div class="cbi-value-field">
 			<input class="cbi-input-checkbox" type="checkbox" name="cbid.sqm.<%=ifname%>.enabled" value="1" <% if uci:get("sqm",ifname,"enabled") == "1" then %>checked<% end %> />
@@ -829,7 +939,7 @@
 			</div>
 		    </div>
 		</div>
-		<div class="cbi-value" data-index="16">
+		<div class="cbi-value" data-index="17">
 		    <label class="cbi-value-title"><%:Download speed (Kb/s)%></label>
 		    <div class="cbi-value-field">
 			<input type="text" name="cbid.sqm.<%=ifname%>.download" class="cbi-input-text" value="<%=download%>" data-type="uinteger">
@@ -845,7 +955,7 @@
 			-->
 		    </div>
 		</div>
-		<div class="cbi-value" data-index="17">
+		<div class="cbi-value" data-index="18">
 		    <label class="cbi-value-title"><%:Upload speed (Kb/s)%></label>
 		    <div class="cbi-value-field">
 			<input type="text" name="cbid.sqm.<%=ifname%>.upload" class="cbi-input-text" value="<%=upload%>" data-type="uinteger">
@@ -871,9 +981,16 @@
 		<select class="cbi-section-create-name" name="add_interface_ifname">
 			<%
 			    for _, ifacea in ipairs(ifaces) do
-				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*")) and device_notvirtual(ifacea) then
+				if not (ifacea == "lo" or ifacea == "6in4-omr6in4" or ifacea == "mlvpn0" or iface == "bond0" or ifacea:match("^ifb.*") or ifacea:match("^sit.*") or ifacea:match("^gre.*") or ifacea:match("^ip6.*") or ifacea:match("^teql.*") or ifacea:match("^erspan.*")) and device_notvirtual(ifacea) then
 			%>
 			<option value="<%=ifacea%>"><%=ifacea%></option>
+			<%
+				end
+			    end
+			    for _, ifacea in ipairs(net:get_networks()) do
+				if not (ifacea:name() == "loopback" or ifacea:name() == "lan" or ifacea:name() == "omr6in4" or ifacea:name() == "omrvpn" or ifacea:name():match("^oip.*")) then
+			%>
+			<option value="<%='@' .. ifacea:name()%>"><%='@' .. ifacea:name() .. ' (alias)'%></option>
 			<%
 				end
 			    end
@@ -886,9 +1003,10 @@
 	    </div>
 	</fieldset>
     </div>
-    <div class="cbi-page-actions">
+    <div class="cbi-page-actions control-group">
 	<input type="hidden" name="token" value="<%=token%>" />
-	<input class="cbi-button cbi-button-apply" type="submit" value="<%:Save & Apply%>" /> <input class="cbi-button cbi-button-reset" type="button" value="Reset" onclick="location.href='<%=url('admin/system/openmptcprouter/wizard')%>'" />
+	<button class="cbi-button cbi-button-apply"><%:Save & Apply%></button>
+	<button class="cbi-button cbi-button-reset"><%:Reset%></button>
     </div>
 </form>
 <script type="text/javascript">cbi_init();</script>

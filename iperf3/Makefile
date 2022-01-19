@@ -1,6 +1,5 @@
 #
 # Copyright (C) 2007-2010 OpenWrt.org
-# Copyright (C) 2019 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -9,14 +8,14 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=iperf
-PKG_SOURCE_VERSION:=02a5f4755878b319f0db5ccd490daf61e6d76043
-PKG_VERSION:=3.7-$(PKG_SOURCE_VERSION)
-PKG_RELEASE:=2
+PKG_VERSION:=3.10.1
+PKG_RELEASE:=10
 
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/esnet/iperf.git
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=https://downloads.es.net/pub/iperf
+PKG_HASH:=03bc9760cc54a245191d46bfc8edaf8a4750f0e87abca6764486972044d6715a
 
-PKG_MAINTAINER:=Yannick Chabanois <ycarus@zugaina.org>
+PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 PKG_LICENSE:=BSD-3-Clause
 
 PKG_BUILD_PARALLEL:=1

@@ -1,7 +1,7 @@
 #!/bin/sh /etc/rc.common
 #
 # Copyright 2019-2020 Xingwang Liao <kuoruan@gmail.com>
-# Copyright 2020 Ycarus (Yannick Chabanois) <ycarus@zugaina.org> for OpenMPTCProuter
+# Copyright 2020-2021 Ycarus (Yannick Chabanois) <ycarus@zugaina.org> for OpenMPTCProuter
 # Licensed to the public under the MIT License.
 #
 
@@ -417,7 +417,7 @@ add_v2ray_redirect_rules() {
 	v2ray-rules -l ${port} -L ${port} -s $OUTBOUND_SERVERS_V4 --rule-name def --src-default forward --dst-default forward --local-default forward
 	[ "$(uci -q get v2ray.main.inbounds | grep omr6)" != "" ] && {
 		v2ray-rules6 -f
-		v2ray-rules6 -l $((port+1)) -L $((port+1)) --rule-name def --src-default forward --dst-default forward --local-default forward
+		v2ray-rules6 -l $((port+1)) -L $((port+1)) -s $OUTBOUND_SERVERS_V6 --rule-name def --src-default forward --dst-default forward --local-default forward
 	}
 	[ -f /etc/init.d/omr-bypass ] && {
 		logger -t "v2ray" "Reload omr-bypass rules"
@@ -2081,20 +2081,31 @@ start_instance() {
 }
 
 rules_exist() {
-	[ -n "$(iptables -t nat -L -n | grep v2r_)" ] && return 0
+	[ -n "$(iptables -w -t nat -L -n | grep v2r_)" ] && return 0
 	return 1
 }
 
 rules_up() {
-	rules_exist && return 0
+	rules_exist && {
+		[ -f /bin/blocklanfw ] && /bin/blocklanfw 2>&1 >/dev/null
+		return 0
+	}
 	enabled="0"
 	config_load v2ray
 	config_get enabled main enabled "0"
 	[ "$enabled" = "0" ] && return
 	OUTBOUND_SERVERS_V4="$(uci -q get v2ray.omrout.s_vless_address)"
+	OUTBOUND_SERVERS_V6="$(uci -q get v2ray.omrout.s_vless_address)"
 	TRANSPARENT_PROXY_PORT="$(uci -q get v2ray.omr.port)"
-	logger -t "v2ray" "Rules UP"
-	add_v2ray_redirect_rules
+	[ -n "$OUTBOUND_SERVERS_V4" ] && {
+		logger -t "v2ray" "Rules UP"
+		add_v2ray_redirect_rules
+	}
+	[ -f /etc/init.d/omr-bypass ] && {
+		logger -t "v2ray" "Reload omr-bypass rules"
+		/etc/init.d/omr-bypass reload_rules
+	}
+	[ -f /bin/blocklanfw ] && /bin/blocklanfw 2>&1 >/dev/null
 }
 
 rules_down() {
