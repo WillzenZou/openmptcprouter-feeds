@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020 Ycarus (Yannick Chabanois) <ycarus@zugaina.org> for OpenMPTCProuter project
+# Copyright (C) 2020-2022 Ycarus (Yannick Chabanois) <ycarus@zugaina.org> for OpenMPTCProuter project
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -10,8 +10,8 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=mptcpd
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/intel/mptcpd.git
-PKG_SOURCE_VERSION:=0e7175adf721c95a3bd742be77cb85e0b47138cd
-PKG_VERSION:=0.7-$(PKG_SOURCE_VERSION)
+PKG_SOURCE_VERSION:=88bea6802379ee1cdbcba4817351b63fd1489537
+PKG_VERSION:=0.9-$(PKG_SOURCE_VERSION)
 PKG_RELEASE:=1
 PKG_MAINTAINER:=Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 
@@ -27,7 +27,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/$(PKG_NAME)
 SECTION:=net
 CATEGORY:=Network
-DEPENDS:=+libell
+DEPENDS:=+libell @(LINUX_5_15||LINUX_6_1)
 TITLE:=mptcpd
 URL:=https://github.com/intel/mptcpd
 endef
@@ -36,7 +36,17 @@ define Package/$(PKG_NAME)/conffiles
 /etc/mptcpd/mptcpd.conf
 endef
 
-TARGET_CFLAGS += -D_GNU_SOURCE -Wno-unused-result -Wno-format-nonliteral
+CONFIGURE_ARGS += \
+	--disable-doxygen-doc \
+	--disable-logging \
+	--with-kernel=upstream
+
+TARGET_CFLAGS += -Wno-unused-result -Wno-format-nonliteral
+
+define Build/Prepare
+	$(Build/Prepare/Default)
+	( cd $(PKG_BUILD_DIR); $(AM_TOOL_PATHS) ./bootstrap )
+endef
 
 define Build/Compile
 	+$(MAKE_VARS) $(MAKE) $(PKG_JOBS) -C $(PKG_BUILD_DIR) $(MAKE_FLAGS)

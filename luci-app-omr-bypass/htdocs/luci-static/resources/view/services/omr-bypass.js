@@ -15,14 +15,28 @@ return L.view.extend({
 	}),
 
 	load: function() {
-		return  this.callHostHints();
+		return Promise.all([
+			L.resolveDefault(fs.stat('/proc/net/xt_ndpi/proto'), null),
+			this.callHostHints()
+		]);
 	},
 
-	render: function(hosts) {
-		var m, s, o;
+	render: function(testhosts) {
+		var m, s, o, hosts;
+		hosts = testhosts[1];
 
 		m = new form.Map('omr-bypass', _('OMR-Bypass'),_('OpenMPTCProuter IP must be used as DNS.'));
 
+		/*
+		s = m.section(form.TypedSection, 'global', _('Global settings'));
+		s.addremove = false;
+		s.anonymous = true;
+
+		o = s.option(form.Flag, 'noipv6', _('Disable IPv6 AAAA DNS results for bypassed domains'));
+		o.default = o.disabled;
+		o.optional = true;
+		*/
+		
 		s = m.section(form.GridSection, 'domains', _('Domains'));
 		s.addremove = true;
 		s.anonymous = true;
@@ -41,6 +55,17 @@ return L.view.extend({
 
 		o = s.option(form.Value, 'note', _('Note'));
 		o.rmempty = true;
+
+		o = s.option(form.ListValue, 'family', _('Restrict to address family'));
+		o.value('ipv4ipv6', _('IPv4 and IPv6'));
+		o.value('ipv4', _('IPv4 only'));
+		o.value('ipv4', _('IPv6 only'));
+		o.default = 'ipv4ipv6';
+		o.modalonly = true
+
+		o = s.option(form.Flag, 'noipv6', _('Disable AAAA IPv6 DNS'));
+		o.default = o.enabled;
+		o.modalonly = true
 
 		s = m.section(form.GridSection, 'ips', _('IPs and Networks'));
 		s.addremove = true;
@@ -190,25 +215,37 @@ return L.view.extend({
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
 		o.default = o.enabled;
 
-		o = s.option(form.Value, 'proto', _('Protocol/Service'));
+		o = s.option(form.ListValue, 'proto', _('Protocol/Service'));
 		o.rmempty = false;
 		o.load = function(section_id) {
 			return Promise.all([
-				fs.read_direct('/proc/net/xt_ndpi/proto'),
-				fs.read_direct('/proc/net/xt_ndpi/host_proto')
+				L.resolveDefault(fs.read_direct('/proc/net/xt_ndpi/proto'), ''),
+				L.resolveDefault(fs.read_direct('/proc/net/xt_ndpi/host_proto'), ''),
+				fs.read_direct('/usr/share/omr-bypass/omr-bypass-proto.lst')
 			]).then(L.bind(function(filesi) {
 				var proto = filesi[0].split(/\n/),
 				    host = filesi[1].split(/\n/),
+				    protofile = filesi[2].split(/\n/),
 				    name = [];
-				for (var i = 0; i < proto.length; i++) {
-					var m = proto[i].split(/\s+/);
-					if (m && m[0] != "#id" && m[1] != "disabled")
-					    name.push(m[2]);
+				if (proto.length > 2) {
+					for (var i = 0; i < proto.length; i++) {
+						var m = proto[i].split(/\s+/);
+						if (m && m[0] != "#id" && m[1] != "disabled")
+						    name.push(m[2]);
+					}
 				}
-				for (var i = 0; i < host.length; i++) {
-					var m = host[i].split(/:/);
-					if (m && m[0] != "#Proto")
-					  name.push(m[0].toLowerCase());
+				if (host.length > 2) {
+					for (var i = 0; i < host.length; i++) {
+						var m = host[i].split(/:/);
+						if (m && m[0] != "#Proto")
+						  name.push(m[0].toLowerCase());
+					}
+				}
+				if (proto.length == 1 && host.length == 1) {
+					for (var i = 0; i < protofile.length; i++) {
+						var m = protofile[i];
+						name.push(m);
+					}
 				}
 				name = Array.from(new Set(name)).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase())}).reduce(function(a, b){ if (a.slice(-1)[0] !== b) a.push(b);return a;},[]);
 				for (var i = 0; i < name.length; i++) {
@@ -225,6 +262,23 @@ return L.view.extend({
 
 		o = s.option(form.Value, 'note', _('Note'));
 		o.rmempty = true;
+
+		o = s.option(form.ListValue, 'family', _('Restrict to address family'));
+		o.value('ipv4ipv6', _('IPv4 and IPv6'));
+		o.value('ipv4', _('IPv4 only'));
+		o.value('ipv4', _('IPv6 only'));
+		o.default = 'ipv4ipv6';
+		o.modalonly = true
+
+		o = s.option(form.Flag, 'noipv6', _('Disable AAAA IPv6 DNS'));
+		o.default = o.enabled;
+		o.modalonly = true
+
+		if (testhosts[0]) {
+			o = s.option(form.Flag, 'ndpi', _('Enable ndpi'));
+			o.default = o.enabled;
+			o.modalonly = true
+		}
 
 		return m.render();
 	}

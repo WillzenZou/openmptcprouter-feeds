@@ -82,6 +82,8 @@ _check_master() {
 							commit v2ray
 							set glorytun.vpn.host=$ip
 							commit glorytun
+							glorytun-udp.vpn.host=$ip
+							commit glorytun
 							set dsvpn.vpn.host=$ip
 							commit dsvpn
 							set mlvpn.general.host=$ip
@@ -89,6 +91,8 @@ _check_master() {
 							del openvpn.omr.remote
 							add_list openvpn.omr.remote=$ip
 							commit openvpn
+							set openmptcprouter.vps.current='1'
+							commit openmptcprouter
 						EOF
 						/etc/init.d/openmptcprouter-vps get_openvpn_key $name >/dev/null 2>/dev/null
 						/etc/init.d/v2ray restart >/dev/null 2>/dev/null
@@ -97,17 +101,24 @@ _check_master() {
 						/etc/init.d/mlvpn restart >/dev/null 2>/dev/null
 						/etc/init.d/openvpn restart >/dev/null 2>/dev/null
 						/etc/init.d/dsvpn restart >/dev/null 2>/dev/null
+						/etc/init.d/mptcpovervpn restart >/dev/null 2>/dev/null
 					fi
 				fi
 				config_load shadowsocks-libev
 				config_foreach _enable_redir ss_redir
 				count=$((count+1))
 			else
+				logger -t "OMR-Tracker-Server" "Master server ${name} down ($ip)"
+				uci -q batch <<-EOF >/dev/null
+					set openmptcprouter.vps.current='0'
+					commit openmptcprouter
+				EOF
 				config_load shadowsocks-libev
 				config_foreach _disable_redir ss_redir
 			fi
 			countips=$((countips+1))
 		}
+		config_load openmptcprouter
 		config_list_foreach $1 ip set_ip
 		#if [ "$server_ping" = true ] && [ "$countips" = "1" ]; then
 		#	uci -q batch <<-EOF >/dev/null
@@ -149,6 +160,8 @@ _check_backup() {
 							commit v2ray
 							set glorytun.vpn.host=$ip
 							commit glorytun
+							glorytun-udp.vpn.host=$ip
+							commit glorytun
 							set dsvpn.vpn.host=$ip
 							commit dsvpn
 							set mlvpn.general.host=$ip
@@ -156,6 +169,8 @@ _check_backup() {
 							del openvpn.omr.remote
 							add_list openvpn.omr.remote=$ip
 							commit openvpn
+							set openmptcprouter.vps.current='1'
+							commit openmptcprouter
 						EOF
 						/etc/init.d/openmptcprouter-vps get_openvpn_key $name >/dev/null 2>/dev/null
 						/etc/init.d/v2ray restart >/dev/null 2>/dev/null
@@ -164,6 +179,7 @@ _check_backup() {
 						/etc/init.d/mlvpn restart >/dev/null 2>/dev/null
 						/etc/init.d/openvpn restart >/dev/null 2>/dev/null
 						/etc/init.d/dsvpn restart >/dev/null 2>/dev/null
+						/etc/init.d/mptcpovervpn restart >/dev/null 2>/dev/null
 					fi
 					sleep $waittest
 				fi
@@ -171,11 +187,16 @@ _check_backup() {
 				config_foreach _enable_redir ss_redir
 				count=$((count+1))
 			else
+				uci -q batch <<-EOF >/dev/null
+					set openmptcprouter.vps.current='0'
+					commit openmptcprouter
+				EOF
 				config_load shadowsocks-libev
 				config_foreach _disable_redir ss_redir
 			fi
 			countips=$((countips+1))
 		}
+		config_load openmptcprouter
 		config_list_foreach $1 ip set_ip
 		#if [ "$server_ping" = true ] && [ "$countips" = "1" ]; then
 		#	uci -q batch <<-EOF >/dev/null
@@ -202,6 +223,7 @@ while true; do
 	config_load openmptcprouter
 	config_foreach _check_master server
 	[ "$server_ping" = false ] && {
+		config_load openmptcprouter
 		config_foreach _check_backup server
 	}
 	sleep "${interval}"

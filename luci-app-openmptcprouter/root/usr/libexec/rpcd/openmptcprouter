@@ -761,6 +761,7 @@ function interfaces_status()
 	mArray.openmptcprouter["local_addr"] = ipaddr
 	--mArray.openmptcprouter["local_addr"] = uci:get("network", "lan", "ipaddr")
 	mArray.openmptcprouter["hostname"] = "OpenMPTCProuter"
+	mArray.openmptcprouter["kernel"] = sys.exec("uname -r")
 	ucic:foreach("system", "system", function(s)
 		mArray.openmptcprouter["hostname"] = uci:get("system",s[".name"],"hostname") or "OpenMPTCProuter"
 	end)
@@ -824,7 +825,7 @@ function interfaces_status()
 				if mArray.openmptcprouter["external_check"] ~= false then
 					mArray.openmptcprouter["proxy_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " " .. check_ipv4_website))
 					if mArray.openmptcprouter["proxy_addr"] == "" then
-						mArray.openmptcprouter["proxy_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " ifconfig.me"))
+						mArray.openmptcprouter["proxy_addr"] = ut.trim(sys.exec("curl -s -4 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m " .. timeout .. " ifconfig.co"))
 					end
 					--mArray.openmptcprouter["ss_addr6"] = sys.exec("curl -s -6 --socks5 " .. tracker_ip .. ":" .. tracker_port .. " -m 3 http://ipv6.openmptcprouter.com")
 				end
@@ -895,7 +896,7 @@ function interfaces_status()
 							mArray.openmptcprouter["vps_status"] = "UP"
 							mArray.openmptcprouter["vps_admin_error_msg"] = ""
 						else
-							uci:set("openmptcprouter",s[".name"],"admin_error","1")
+							uci:set("openmptcprouter",s[".name"],"token_error","1")
 							mArray.openmptcprouter["vps_admin_error"] = true
 							uci:delete("openmptcprouter",s[".name"],"token")
 							uci:save("openmptcprouter",s[".name"])
@@ -931,6 +932,11 @@ function interfaces_status()
 					else
 						mArray.openmptcprouter["vps_admin"] = false
 						mArray.openmptcprouter["vps_admin_error_msg"] = "No result"
+						uci:set("openmptcprouter",s[".name"],"token_error","1")
+						mArray.openmptcprouter["vps_admin_error"] = true
+						uci:delete("openmptcprouter",s[".name"],"token")
+						uci:save("openmptcprouter",s[".name"])
+						uci:commit("openmptcprouter",s[".name"])
 					end
 				else
 					mArray.openmptcprouter["vps_admin"] = false
@@ -950,6 +956,12 @@ function interfaces_status()
 		end
 	end)
 
+	mArray.openmptcprouter["kernel_match"] = true
+	if mArray.openmptcprouter["vps_kernel"] ~= "" then
+		if mArray.openmptcprouter["kernel"]:sub(1,3) == "5.4" and mArray.openmptcprouter["vps_kernel"]:sub(1,3) ~= "5.4" then
+			mArray.openmptcprouter["kernel_match"] = false
+		end
+	end
 
 	if mArray.openmptcprouter["vps_hostname"] == "" then
 		mArray.openmptcprouter["vps_hostname"] = "Server"
@@ -1022,7 +1034,7 @@ function interfaces_status()
 			mArray.openmptcprouter["multi_vpn"] = true
 		end
 	end
-	
+
 	-- check Shadowsocks is running
 	mArray.openmptcprouter["shadowsocks_service"] = false
 	if string.find(sys.exec("/usr/bin/pgrep ss-redir"), "%d+") then
@@ -1030,10 +1042,17 @@ function interfaces_status()
 	end
 
 	mArray.openmptcprouter["shadowsocks_enabled"] = true
-	local ss_server = uci:get("shadowsocks-libev","sss0","disabled") or "0"
+	local ss_server = "1"
+	ucic:foreach("shadowsocks-libev", "server", function(s)
+		local ss_server_disabled = uci:get("shadowsocks-libev",s[".name"],"disabled") or "0"
+		if ss_server_disabled == "0" then
+			ss_server = "0"
+		end
+	end)
 	if ss_server == "1" then
 		mArray.openmptcprouter["shadowsocks_enabled"] = false
 	end
+
 	-- check V2Ray is running
 	mArray.openmptcprouter["v2ray_service"] = false
 	if string.find(sys.exec("/usr/bin/pgrep v2ray"), "%d+") then
@@ -1062,8 +1081,10 @@ function interfaces_status()
 		mArray.openmptcprouter.dhcpd[itf].range_end = range_end
 		mArray.openmptcprouter.dhcpd[itf].netmask = mask
 		mArray.openmptcprouter.dhcpd[itf].leasetime = leasetime
-		mArray.openmptcprouter.dhcpd[itf].router = mArray.openmptcprouter["local_addr"]
-		mArray.openmptcprouter.dhcpd[itf].dns = mArray.openmptcprouter["local_addr"]
+		local net = ntm:get_network(itf)
+		local ipaddr = net:ipaddr() or ""
+		mArray.openmptcprouter.dhcpd[itf].router = ipaddr
+		mArray.openmptcprouter.dhcpd[itf].dns = ipaddr
 	end
 	for itf, option, value in dnsmasq:gmatch("option=(%w+),([%w:-]+),(%d+\.%d+\.%d+\.%d+)") do
 		if mArray.openmptcprouter.dhcpd[itf] then
@@ -1149,7 +1170,7 @@ function interfaces_status()
 	    --end
 	    
 	    duplicateif = false
-	    if ifname ~= "" and ifname ~= nil and not (section["device"] ~= nil and section["device"]:match("^@.*")) then
+	    if ifname ~= "" and ifname ~= nil and not (section["device"] ~= nil and section["device"]:match("^@.*")) and (proto == "static" or proto == "dhcp") then
 		if allintf[ifname] then
 		    connectivity = "ERROR"
 		    duplicateif = true
@@ -1233,18 +1254,10 @@ function interfaces_status()
 	    -- Detect WAN gateway status
 	    local gw_ping = "UP"
 	    local gw_ping6 = "UP"
-	    if ifname ~= nil and not (ifname:match("^tun.*") or interface:match("^ovpn.*") or interface:match("^wg.*")) then
-	        if proto ~= "dhcpv6" then
-			gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
-		end
-		if ipv6 == "1" or ipv6 == "auto" then
-			gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
-		end
-	    end
-
 	    if gateway == "" and proto ~= "dhcpv6" then
 		    gateway = get_gateway(interface)
 	    end
+
 	    if gateway == "" and ifname ~= nil and ifname ~= "" and ipv6 ~= "1" and ipv6 ~= "auto" then
 		    if fs.access("/sys/class/net/" .. ifname) then
 			    gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep kernel | awk '/proto kernel/ {print $1}' | grep -v / | tr -d '\n'"))
@@ -1252,6 +1265,11 @@ function interfaces_status()
 				gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep default | awk '{print $3}' | tr -d '\n'"))
 			    end
 		    end
+	    end
+	    if ifname ~= nil and not (ifname:match("^tun.*") or interface:match("^ovpn.*") or interface:match("^wg.*")) then
+	        if proto ~= "dhcpv6" and gateway == "" then
+			gateway = ut.trim(sys.exec("ip -4 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
+		end
 	    end
 	    if gateway6 == "" and (ipv6 == "1" or ipv6 == "auto") then
 		    gateway6 = get_gateway6(interface)
@@ -1263,6 +1281,11 @@ function interfaces_status()
 				    gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep default | awk '{print $3}' | tr -d '\n'"))
 			    end
 		    end
+	    end
+	    if ifname ~= nil and not (ifname:match("^tun.*") or interface:match("^ovpn.*") or interface:match("^wg.*")) then
+		if ipv6 == "1" or ipv6 == "auto" and gateway6 == ""then
+			gateway6 = ut.trim(sys.exec("ip -6 r list dev " .. ifname .. " | grep via | grep -v default | grep -v metric | awk '{print $1}' | tr -d '\n'"))
+		end
 	    end
 	    local signal = ""
 	    local operator = ""
@@ -1478,12 +1501,18 @@ function interfaces_status()
 				    whois = ut.trim(sys.exec("whois " .. publicIP .. " | grep -i 'netname' | awk '{print $2}'"))
 				    --whois = ut.trim(sys.exec("wget -4 -qO- -T 1 'http://api.iptoasn.com/v1/as/ip/" .. publicIP .. "' | jsonfilter -q -e '@.as_description'"))
 			    end
+			    if publicIP == mArray.openmptcprouter["wan_addr"] then
+				mArray.openmptcprouter["direct_output"] = true
+			    end
 		    end
 		    if publicIP6 ~= "" then
 		    	    whois6 = uci:get("openmptcprouter",interface,"asn") or ""
 			    if whois6 == "" and mArray.openmptcprouter["external_check"] ~= false and mArray.openmptcprouter["dns"] == true then
 				    whois6 = ut.trim(sys.exec("whois " .. publicIP6 .. " | grep -i 'netname' | awk '{print $2}'"))
 				    --whois6 = ut.trim(sys.exec("wget -6 -qO- -T 1 'http://api.iptoasn.com/v1/as/ip/" .. publicIP6 .. "' | jsonfilter -q -e '@.as_description'"))
+			    end
+			    if publicIP6 == mArray.openmptcprouter["wan_addr6"] then
+				mArray.openmptcprouter["direct_output"] = true
 			    end
 		    end
 		    if ifname ~= "" and ifname ~= nil then

@@ -167,6 +167,7 @@ function wizard_add()
 			ucic:set("network","wan" .. i .. "_dev","mode","vepa")
 			ucic:set("network","wan" .. i .. "_dev","ifname",defif)
 			ucic:set("network","wan" .. i .. "_dev","name","wan" .. i)
+			ucic:set("network","wan" .. i .. "_dev","txqueuelen","1000")
 		end
 		ucic:set("network","wan" .. i,"ip4table","wan")
 		if multipath_master then
@@ -257,6 +258,8 @@ function wizard_add()
 	end
 
 	-- Set interfaces settings
+	local downloadmax = 0
+	local uploadmax = 0
 	local interfaces = luci.http.formvaluetable("intf")
 	for intf, _ in pairs(interfaces) do
 		local label = luci.http.formvalue("cbid.network.%s.label" % intf) or ""
@@ -282,6 +285,8 @@ function wizard_add()
 		local auth = luci.http.formvalue("cbid.network.%s.auth" % intf) or ""
 		local mode = luci.http.formvalue("cbid.network.%s.mode" % intf) or ""
 		local sqmenabled = luci.http.formvalue("cbid.sqm.%s.enabled" % intf) or "0"
+		local sqmautorate = luci.http.formvalue("cbid.sqm.%s.autorate" % intf) or "0"
+		local qosenabled = luci.http.formvalue("cbid.qos.%s.enabled" % intf) or "0"
 		local multipath = luci.http.formvalue("cbid.network.%s.multipath" % intf) or "on"
 		local lan = luci.http.formvalue("cbid.network.%s.lan" % intf) or "0"
 		local ttl = luci.http.formvalue("cbid.network.%s.ttl" % intf) or ""
@@ -298,9 +303,10 @@ function wizard_add()
 			ucic:set("network",intf,"type","macvlan")
 			ucic:set("network",intf .. "_dev","device")
 			ucic:set("network",intf .. "_dev","type","macvlan")
-			ucic:set("network",intf .. "_dev","ifname",masterinf)
+			ucic:set("network",intf .. "_dev","ifname",masterintf)
 			ucic:set("network",intf .. "_dev","mode","vepa")
 			ucic:set("network",intf .. "_dev","name",intf)
+			ucic:set("network",intf,"device",intf)
 			ucic:set("network",intf,"masterintf",masterintf)
 		elseif typeintf == "" and ifname ~= "" and (proto == "static" or proto == "dhcp" or proto == "dhcpv6") then
 			ucic:set("network",intf,"device",ifname)
@@ -333,6 +339,15 @@ function wizard_add()
 				ucic:set("network",intf .. "_dev","name",ifname)
 			end
 		end
+		if typeintf ~= "macvlan" then
+			if ucic:get("network",intf .. "_dev","type") == "macvlan" then
+				ucic:delete("network",intf .. "_dev","type")
+				ucic:delete("network",intf .. "_dev","mode")
+				ucic:delete("network",intf .. "_dev","ifname")
+				ucic:delete("network",intf .. "_dev","macaddr")
+			end
+			ucic:delete("network",intf,"masterintf")
+		end
 		if proto == "pppoe" then
 			ucic:set("network",intf,"pppd_options","persist maxfail 0")
 		end
@@ -364,20 +379,22 @@ function wizard_add()
 		ucic:set("network",intf,"defaultroute",0)
 		ucic:set("network",intf,"peerdns",0)
 		if ipaddr ~= "" then
-			ucic:set("network",intf,"ipaddr",ipaddr)
-			ucic:set("network",intf,"netmask",netmask)
-			ucic:set("network",intf,"gateway",gateway)
+			ucic:set("network",intf,"ipaddr",ipaddr:gsub("%s+", ""))
+			ucic:set("network",intf,"netmask",netmask:gsub("%s+", ""))
+			ucic:set("network",intf,"gateway",gateway:gsub("%s+", ""))
 		else
 			ucic:set("network",intf,"ipaddr","")
 			ucic:set("network",intf,"netmask","")
 			ucic:set("network",intf,"gateway","")
 		end
 		if ip6addr ~= "" then
-			ucic:set("network",intf,"ip6addr",ip6addr)
-			ucic:set("network",intf,"ip6gw",ip6gw)
+			ucic:set("network",intf,"ip6addr",ip6addr:gsub("%s+", ""))
+			ucic:set("network",intf,"ip6gw",ip6gw:gsub("%s+", ""))
+			ucic:set("network",intf,"ipv6","1")
 		else
 			ucic:set("network",intf,"ip6addr","")
 			ucic:set("network",intf,"ip6gw","")
+			ucic:set("network",intf,"ipv6","0")
 		end
 		
 		if proto == "dhcpv6" then
@@ -431,20 +448,39 @@ function wizard_add()
 			--ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress dual-dsthost")
 			--ucic:set("sqm",intf,"eqdisc_opts","dual-srchost")
 		end
+		ucic:set("sqm",intf,"autorate",sqmautorate)
 
+		if sqmautorate == "1" then
+			ucic:set("sqm",intf,"qdisc","cake")
+			ucic:set("sqm",intf,"script","piece_of_cake.qos")
+		end
 		if downloadspeed ~= "0" and downloadspeed ~= "" then
+			if sqmautorate == "1" and (ucic:get("network",intf,"downloadspeed") ~= downloadspeed or ucic:get("sqm",intf,"max_download") == "" or ucic:get("sqm",intf,"download") == "0") then
+				ucic:set("sqm",intf,"download",math.ceil(downloadspeed*65/100))
+				ucic:set("sqm",intf,"min_download",math.ceil(downloadspeed*10/100))
+				ucic:set("sqm",intf,"max_download",downloadspeed)
+			elseif sqmautorate ~= "1" then
+				ucic:set("sqm",intf,"download",math.ceil(downloadspeed*95/100))
+			end
 			ucic:set("network",intf,"downloadspeed",downloadspeed)
-			ucic:set("sqm",intf,"download",math.ceil(downloadspeed*95/100))
 			ucic:set("qos",intf,"download",math.ceil(downloadspeed*95/100))
+			downloadmax = downloadmax + tonumber(downloadspeed)
 		else
 			ucic:delete("network",intf,"downloadspeed")
 			ucic:set("sqm",intf,"download","0")
 			ucic:set("qos",intf,"download","0")
 		end
 		if uploadspeed ~= "0" and uploadspeed ~= "" then
+			if sqmautorate == "1" and (ucic:get("network",intf,"uploadspeed") ~= uploadspeed or ucic:get("sqm",intf,"max_upload") == "" or ucic:get("sqm",intf,"upload") == "0") then
+				ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*65/100))
+				ucic:set("sqm",intf,"min_upload",math.ceil(uploadspeed*10/100))
+				ucic:set("sqm",intf,"max_upload",uploadspeed)
+			elseif sqmautorate ~= "1" then
+				ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*95/100))
+			end
 			ucic:set("network",intf,"uploadspeed",uploadspeed)
-			ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*95/100))
 			ucic:set("qos",intf,"upload",math.ceil(uploadspeed*95/100))
+			uploadmax = uploadmax + tonumber(uploadspeed)
 		else
 			ucic:delete("network",intf,"uploadspeed")
 			ucic:set("sqm",intf,"upload","0")
@@ -456,9 +492,12 @@ function wizard_add()
 			--ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress dual-dsthost")
 			--ucic:set("sqm",intf,"eqdisc_opts","dual-srchost")
 			ucic:set("sqm",intf,"enabled","1")
-			ucic:set("qos",intf,"enabled","1")
 		else
 			ucic:set("sqm",intf,"enabled","0")
+		end
+		if qosenabled == "1" then
+			ucic:set("qos",intf,"enabled","1")
+		else
 			ucic:set("qos",intf,"enabled","0")
 		end
 	end
@@ -512,6 +551,14 @@ function wizard_add()
 		vpn_intf = "bonding-omrvpn"
 		ucic:set("network","omrvpn","proto","bonding")
 	end
+	if downloadmax ~= 0 and uploadmax ~= 0 then
+		ucic:set("sqm","omrvpn","max_download",downloadmax)
+		ucic:set("sqm","omrvpn","max_upload",uploadmax)
+		ucic:set("sqm","omrvpn","download",math.ceil(downloadmax*50/100))
+		ucic:set("sqm","omrvpn","min_download",math.ceil(downloadmax*8/100))
+		ucic:set("sqm","omrvpn","upload",math.ceil(uploadmax*50/100))
+		ucic:set("sqm","omrvpn","min_upload",math.ceil(uploadmax*8/100))
+	end
 	if vpn_intf ~= "" then
 		ucic:set("network","omrvpn","device",vpn_intf)
 		ucic:set("sqm","omrvpn","interface",vpn_intf)
@@ -551,10 +598,12 @@ function wizard_add()
 				ucic:set("openmptcprouter",server,"get_config","1")
 			end
 			ucic:set("openmptcprouter",server,"master","1")
+			ucic:set("openmptcprouter",server,"current","1")
 			ucic:set("openmptcprouter",server,"backup","0")
 		else
 			ucic:set("openmptcprouter",server,"get_config","0")
 			ucic:set("openmptcprouter",server,"master","0")
+			ucic:set("openmptcprouter",server,"current","0")
 			ucic:set("openmptcprouter",server,"backup","1")
 		end
 		if openmptcprouter_vps_disabled == "1" then
@@ -564,11 +613,17 @@ function wizard_add()
 			serversnb = serversnb + 1
 		end
 		ucic:set("openmptcprouter",server,"server")
-		ucic:set("openmptcprouter",server,"username",openmptcprouter_vps_username)
-		ucic:set("openmptcprouter",server,"password",openmptcprouter_vps_key)
+		ucic:set("openmptcprouter",server,"username",openmptcprouter_vps_username:gsub("%s+", ""))
+		ucic:set("openmptcprouter",server,"password",openmptcprouter_vps_key:gsub("%s+", ""))
 		ucic:set("openmptcprouter",server,"disabled",openmptcprouter_vps_disabled)
-		ucic:set_list("openmptcprouter",server,"ip",aserverips)
+		if ucic:get("openmptcprouter",server,"ip") ~= aserverips then
+			ucic:set_list("openmptcprouter",server,"ip",aserverips)
+			if ucic:get("openmptcprouter",server,"master") == "1" then
+				ucic:set("openmptcprouter",server,"get_config","1")
+			end
+		end
 		ucic:set("openmptcprouter",server,"port","65500")
+		ucic:set("openmptcprouter",server,"set_firewall","1")
 		ucic:save("openmptcprouter")
 	end
 
@@ -593,6 +648,8 @@ function wizard_add()
 		ucic:set("unbound","ub_main","dns64","0")
 	
 	end
+	ucic:save("unbound")
+	ucic:commit("unbound")
 
 	-- Get Proxy set by default
 	local default_proxy = luci.http.formvalue("default_proxy") or "shadowsocks"
@@ -601,7 +658,7 @@ function wizard_add()
 		ucic:set("v2ray","main","enabled","0")
 		ucic:foreach("shadowsocks-libev", "server", function(s)
 			local sectionname = s[".name"]
-			if sectionname:match("^sss.*") then
+			if sectionname:match("^sss.*") and ucic:get("shadowsocks-libev",sectionname,"server") ~= "" then
 				ucic:set("shadowsocks-libev",sectionname,"disabled","0")
 			end
 		end)
@@ -670,7 +727,7 @@ function wizard_add()
 					local nbip = 0
 					for _, ssip in pairs(server_ips) do
 						ucic:set("shadowsocks-libev","sss" .. nbip,"server",ssip)
-						if default_proxy == "shadowsocks" and serversnb > disablednb then
+						if default_proxy == "shadowsocks" and serversnb > disablednb and ssip ~= "" then
 							ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","0")
 						end
 						nbip = nbip + 1
@@ -708,7 +765,7 @@ function wizard_add()
 				local nbip = 0
 				for _, ssip in pairs(server_ips) do
 					ucic:set("shadowsocks-libev","sss" .. nbip,"server",ssip)
-					if default_proxy == "shadowsocks" and serversnb > disablednb then
+					if default_proxy == "shadowsocks" and serversnb > disablednb and ssip ~= "" then
 						ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","0")
 					end
 					nbip = nbip + 1
@@ -804,8 +861,8 @@ function wizard_add()
 		end
 	else
 		if serversnb == 0 then
-			ucic:set("shadowsocks-libev","sss0","disabled",shadowsocks_disable)
-			ucic:set("shadowsocks-libev","sss1","disabled",shadowsocks_disable)
+			ucic:set("shadowsocks-libev","sss0","disabled","1")
+			ucic:set("shadowsocks-libev","sss1","disabled","1")
 		end
 		ucic:set("shadowsocks-libev","sss0","key","")
 		ucic:set("shadowsocks-libev","sss1","key","")
@@ -940,7 +997,7 @@ function wizard_add()
 		ucic:set("openvpn","omr","enabled",1)
 		ucic:set("network","omrvpn","proto","none")
 	else
-		ucic:set("openvpn","omr","enabled",0)
+		ucic:delete("openvpn","omr","enabled")
 	end
 	ucic:save("openvpn")
 	ucic:commit("openvpn")
@@ -987,6 +1044,8 @@ function wizard_add()
 		luci.sys.call("/etc/init.d/omr-6in4 restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/vnstat restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/v2ray restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/sqm-autorate restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/sysntpd restart >/dev/null 2>/dev/null")
 		luci.http.redirect(luci.dispatcher.build_url("admin/system/" .. menuentry:lower() .. "/status"))
 	else
 		luci.http.redirect(luci.dispatcher.build_url("admin/system/" .. menuentry:lower() .. "/wizard"))
@@ -1112,6 +1171,12 @@ function settings_add()
 	local shadowsocksudp = luci.http.formvalue("shadowsocksudp") or "0"
 	ucic:set("openmptcprouter","settings","shadowsocksudp",shadowsocksudp)
 
+	-- Enable/disable v2ray udp
+	local v2rayudp = luci.http.formvalue("v2rayudp") or "0"
+	ucic:set("v2ray","main_transparent_proxy","redirect_udp",v2rayudp)
+	ucic:save("v2ray")
+	ucic:commit("v2ray")
+
 	-- Enable/disable nDPI
 	local ndpi = luci.http.formvalue("ndpi") or "1"
 	ucic:set("openmptcprouter","settings","ndpi",ndpi)
@@ -1183,6 +1248,9 @@ function settings_add()
 	local sfe_bridge = luci.http.formvalue("sfe_bridge") or "0"
 	ucic:set("openmptcprouter","settings","sfe_bridge",sfe_bridge)
 
+	-- Enable/disable SIP ALG
+	local sipalg = luci.http.formvalue("sipalg") or "0"
+	ucic:set("openmptcprouter","settings","sipalg",sipalg)
 
 	ucic:save("openmptcprouter")
 	ucic:commit("openmptcprouter")
