@@ -53,14 +53,24 @@ fi
 
 if [ "$(uci -q get shadowsocks-libev.hi3)" != "" ]; then
 	port=1100
+	[ "$NBCPU" -gt "10" ] && NBCPU=10
 	for c in $(seq 1 2 $NBCPU); do
 		uci -q batch <<-EOF >/dev/null
 			set shadowsocks-libev.hi$c.local_port=$port
 			set shadowsocks-libev.hi$c.server=sss0
+			set shadowsocks-libev.hi$((c+1))=ss_redir
 			set shadowsocks-libev.hi$((c+1)).local_address="::"
 			set shadowsocks-libev.hi$((c+1)).local_port=$port
 			set shadowsocks-libev.hi$((c+1)).local_address="::"
 			set shadowsocks-libev.hi$((c+1)).server=sss1
+			set shadowsocks-libev.hi$((c+1)).mode=tcp_and_udp
+			set shadowsocks-libev.hi$((c+1)).timeout=1000
+			set shadowsocks-libev.hi$((c+1)).fast_open=1
+			set shadowsocks-libev.hi$((c+1)).reuse_port=1
+			set shadowsocks-libev.hi$((c+1)).syslog=1
+			set shadowsocks-libev.hi$((c+1)).mptcp=1
+			set shadowsocks-libev.hi$((c+1)).no_delay=1
+			set shadowsocks-libev.hi$((c+1)).verbose=0
 			commit shadowsocks-libev
 		EOF
 		port=$((port+1))
@@ -106,6 +116,34 @@ if [ "$(uci -q get shadowsocks-libev.sss1)" = "" ]; then
 		commit shadowsocks-libev
 	EOF
 fi
+if [ -z "$(uci -q get shadowsocks-rust.hi1.keep_alive)" ]; then
+	uci -q batch <<-EOF > /dev/null
+		set shadowsocks-rust.hi1.keep_alive=15
+		set shadowsocks-rust.hi1.no_delay=1
+		set shadowsocks-rust.hi1.fast_open=0
+		set shadowsocks-rust.hi2.keep_alive=15
+		set shadowsocks-rust.hi2.no_delay=1
+		set shadowsocks-rust.hi2.fast_open=0
+		commit shadowsocks-rust
+	EOF
+fi
+if [ -z "$(uci -q get shadowsocks-rust.dns.forward_address)" ]; then
+	uci -q batch <<-EOF > /dev/null
+		set shadowsocks-rust.dns.forward_address="8.8.8.8"
+		set shadowsocks-rust.dns.forward_port=53
+		del shadowsocks-rust.dns.tunnel_address
+		commit shadowsocks-rust
+	EOF
+fi
+
+if [ "$(uci -q get shadowsocks-rust.hi1.fast_open)" = "1" ]; then
+	uci -q batch <<-EOF > /dev/null
+		set shadowsocks-rust.hi1.fast_open=0
+		set shadowsocks-rust.hi2.fast_open=0
+		commit shadowsocks-rust
+	EOF
+fi
+
 
 rm -f /tmp/luci-indexcache
 exit 0

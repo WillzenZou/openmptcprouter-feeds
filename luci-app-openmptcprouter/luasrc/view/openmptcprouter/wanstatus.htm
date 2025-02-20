@@ -19,7 +19,7 @@
 --    along with OverTheBox.  If not, see (http://www.gnu.org/licenses/)
 -%>
 <%
--- Copyright 2018-2020 Ycarus (Yannick Chabanois) ycarus@zugaina.org for OpenMPTCProuter
+-- Copyright 2018-2022 Ycarus (Yannick Chabanois) ycarus@zugaina.org for OpenMPTCProuter
 --
 -- Small changes to make this work with OpenMPTCProuter
 -- New features: 
@@ -101,7 +101,7 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 				temp += '<li id="networkRootNode"><table><tr><td><table>';
 				if (mArray.wans)
 				{
-					temp += '<tr class="space"><td></td></tr>';
+					temp += '<tr class="spaceline"><td></td></tr>';
 					for( var j = 1; j < mArray.wans.length; j++ )
 					{
 						temp += '<tr class="spaceline"><td></td></tr>';
@@ -132,7 +132,12 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 				}
 				if (mArray.openmptcprouter.core_temp)
 				{
-					content += '<%:Core temp:%>' + " " + (mArray.openmptcprouter.core_temp / 1000).toFixed(1) + " &#176;";
+					if (mArray.openmptcprouter.core_temp > 100000)
+					{
+						content += '<%:Core temp:%>' + " " + (mArray.openmptcprouter.core_temp / 10000).toFixed(1) + " &#176;";
+					} else {
+						content += '<%:Core temp:%>' + " " + (mArray.openmptcprouter.core_temp / 1000).toFixed(1) + " &#176;";
+					}
 					content += "<br />";
 				}
 				if (mArray.openmptcprouter.uptime)
@@ -163,11 +168,31 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 						statusMessage += '<br/>';
 					}
 				}
+				if (mArray.openmptcprouter.shadowsocksrust_enabled == true && mArray.openmptcprouter.service_addr != "") 
+				{
+					if (mArray.openmptcprouter.shadowsocksrust_service == false)
+					{
+						statusMessage += '<%:ShadowSocks Rust is not running%>';
+						if (mArray.openmptcprouter.shadowsocksrust_service_key == false && mArray.openmptcprouter.shadowsocksrust_service_method !== "none")
+						{
+							statusMessage += ' <i>(' + '<%:empty key%>' + ')</i>';
+						}
+						statusMessage += '<br/>';
+					}
+				}
 				if (mArray.openmptcprouter.v2ray_enabled == true && mArray.openmptcprouter.service_addr != "")
 				{
 					if (mArray.openmptcprouter.v2ray_service == false)
 					{
 						statusMessage += '<%:V2Ray is not running%>';
+						statusMessage += '<br/>';
+					}
+				}
+				if (mArray.openmptcprouter.xray_enabled == true && mArray.openmptcprouter.service_addr != "")
+				{
+					if (mArray.openmptcprouter.xray_service == false)
+					{
+						statusMessage += '<%:XRay is not running%>';
 						statusMessage += '<br/>';
 					}
 				}
@@ -194,7 +219,7 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					statusIcon = "<%=resource%>/openmptcprouter/images/statusError.png";
 				} else if (mArray.openmptcprouter.service_addr != "")
 				{
-					if (mArray.openmptcprouter.v2ray_enabled == false && mArray.openmptcprouter.shadowsocks_enabled == false)
+					if (mArray.openmptcprouter.xray_enabled == false && mArray.openmptcprouter.v2ray_enabled == false && mArray.openmptcprouter.shadowsocks_enabled == false && mArray.openmptcprouter.shadowsocksrust_enabled == false)
 					{
 						statusMessage += '<%:Proxy is DISABLED%>' + '<br/>';
 					} 
@@ -207,7 +232,7 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 						if (mArray.openmptcprouter.tun6_state == "DOWN")
 						{
 							statusMessage += '<%:IPv6 tunnel DOWN%>' + '<br/>';
-						} else if (mArray.openmptcprouter.wan_addr6 == '')
+						} else if (mArray.openmptcprouter.wan_addr6 == '' && mArray.openmptcprouter.dns_filter_aaaa == false)
 						{
 							statusMessage += '<%:No IPv6 access%>' + '<br/>';
 						}
@@ -240,28 +265,34 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 				} else if (mArray.openmptcprouter.wan_addr6 != "" && mArray.openmptcprouter.service_addr == "127.0.0.1")
 				{
 					var title = String.format("%s (%s)", mArray.openmptcprouter.vps_hostname, mArray.openmptcprouter.wan_addr6);
-				} else if (mArray.openmptcprouter.wan_addr != "")
+				} else if (mArray.openmptcprouter.wan_addr6 != "" && mArray.openmptcprouter.direct_output == false)
+				{
+					var title = String.format("%s (%s)", mArray.openmptcprouter.vps_hostname, mArray.openmptcprouter.wan_addr6);
+				} else if (mArray.openmptcprouter.wan_addr != "" && mArray.openmptcprouter.direct_output == false)
+				{
+					var title = String.format("%s (%s)", mArray.openmptcprouter.vps_hostname, mArray.openmptcprouter.wan_addr);
+				} else if (mArray.openmptcprouter.wan_addr != "" && mArray.openmptcprouter.direct_output == true)
 				{
 					var title = String.format("%s (%s)", _('Direct output'), mArray.openmptcprouter.wan_addr);
 					statusMessageClass = "warning";
 					statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
-				} else if (mArray.openmptcprouter.wan_addr6 != "")
+				} else if (mArray.openmptcprouter.wan_addr6 != "" && mArray.openmptcprouter.direct_output == true)
 				{
 					var title = String.format("%s (%s)", _('Direct output'), mArray.openmptcprouter.wan_addr6);
 					statusMessageClass = "warning";
 					statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
-				} else if (mArray.openmptcprouter.ss_addr != "" && mArray.openmptcprouter.vps_status != "DOWN")
+				} else if (mArray.openmptcprouter.proxy_addr != "" && mArray.openmptcprouter.vps_status != "DOWN")
 				{
-					var title = String.format("%s (%s)", mArray.openmptcprouter.vps_hostname, mArray.openmptcprouter.ss_addr);
+					var title = String.format("%s (%s)", mArray.openmptcprouter.vps_hostname, mArray.openmptcprouter.proxy_addr);
 				} else if (mArray.openmptcprouter.external_check == false) {
 					var title = String.format("%s ?", mArray.openmptcprouter.vps_hostname);
 				} else {
 					var title = '<%:No output%>';
 					statusMessage += '<%:No output%>' + '<br/>';
 				}
-				if (mArray.openmptcprouter.wan_addr == "" && mArray.openmptcprouter.wan_addr6 == "" && mArray.openmptcprouter.ss_addr == "" && mArray.openmptcprouter.external_check == true)
+				if (mArray.openmptcprouter.wan_addr == "" && mArray.openmptcprouter.wan_addr6 == "" && mArray.openmptcprouter.proxy_addr == "" && mArray.openmptcprouter.external_check == true)
 				{
-					statusMessage += '<%:No server IP address, No WAN IP address%>' + '<br/>';
+					statusMessage += '<%:No server IP address, No public IP address%>' + '<br/>';
 				}
 				if (mArray.openmptcprouter.service_addr !== "" && (mArray.openmptcprouter.wan_addr !== "" || mArray.openmptcprouter.wan_addr6 !== "") && mArray.openmptcprouter.vps_status == "DOWN")
 				{
@@ -279,15 +310,21 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					if (mArray.openmptcprouter.vps_status == "DOWN")
 					{
 						statusMessage += '<%:Can\'t ping server%>' + '<br/>';
-					} else if (mArray.openmptcprouter.shadowsocks_enabled == true && mArray.openmptcprouter.ss_addr == "" && mArray.openmptcprouter.external_check == true)
+					} else if (mArray.openmptcprouter.shadowsocks_enabled == true && mArray.openmptcprouter.proxy_addr == "" && mArray.openmptcprouter.external_check == true)
 					{
 						statusMessage += '<%:Can\'t get public IP address from ShadowSocks%>' + '<br/>';
-					} else if (mArray.openmptcprouter.v2ray_enabled == true && mArray.openmptcprouter.ss_addr == "" && mArray.openmptcprouter.external_check == true)
+					} else if (mArray.openmptcprouter.shadowsocksrust_enabled == true && mArray.openmptcprouter.proxy_addr == "" && mArray.openmptcprouter.external_check == true)
+					{
+						statusMessage += '<%:Can\'t get public IP address from ShadowSocks Rust%>' + '<br/>';
+					} else if (mArray.openmptcprouter.v2ray_enabled == true && mArray.openmptcprouter.proxy_addr == "" && mArray.openmptcprouter.external_check == true)
 					{
 						statusMessage += '<%:Can\'t get public IP address from V2Ray%>' + '<br/>';
+					} else if (mArray.openmptcprouter.xray_enabled == true && mArray.openmptcprouter.proxy_addr == "" && mArray.openmptcprouter.external_check == true)
+					{
+						statusMessage += '<%:Can\'t get public IP address from XRay%>' + '<br/>';
 					} else if (mArray.openmptcprouter.wan_addr == "" && mArray.openmptcprouter.wan_addr6 == "" && mArray.openmptcprouter.external_check == true)
 					{
-						statusMessage += '<%:No WAN IP address detected in less than 1 second%>' + '<br/>';
+						statusMessage += '<%:No public IP address detected in less than 1 second%>' + '<br/>';
 					}
 					if (mArray.openmptcprouter.vps_admin == false)
 					{
@@ -304,7 +341,9 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					} 
 					if (mArray.openmptcprouter.vps_time_accurate == false)
 					{
-						statusMessage += '<%:Big time difference between the server and the router%>' + '<br/>';
+						var vps_time = new Date(mArray.openmptcprouter.vps_time*1000).toISOString();
+						var omr_time = new Date(mArray.openmptcprouter.omr_time*1000).toISOString();
+						statusMessage += '<%:Big time difference between the server and the router%> (' + vps_time + '/' + omr_time + ') <br/>';
 					}
 				}
 				if (statusMessage !== "" && statusMessageClass !== "error")
@@ -339,6 +378,12 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 				if (mArray.openmptcprouter.server_mptcp == "disabled")
 				{
 					statusMessage += '<%:MPTCP may not be enabled on the server%>' + '<br/>';
+					statusMessageClass = "warning";
+					statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
+				}
+				if (mArray.openmptcprouter.kernel_match == false)
+				{
+					statusMessage += '<%:MPTCP kernel on router and VPS doesn't match%>' + '<br/>';
 					statusMessageClass = "warning";
 					statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
 				}
@@ -395,12 +440,19 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 							statusMessageClass = "error";
 							statusMessage = "";
 							break;
+						case 'WARNING':
+							stat = 'Warning';
+							cssc = 'rgb(144, 240, 144)';
+							statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
+							statusMessageClass = "warning";
+							statusMessage = "Some connectivity tests failed" + '<br />';
+							break;
 						default:
 							stat = 'Unknown';
 							cssc = 'rgb(144, 240, 144)';
 							statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
 							statusMessageClass = "warning";
-							statusMessage = "";
+							statusMessage = "Unknown status (" + mArray.wans[i].status + ")" + '<br />';
 					}
 					// Populate info
 					var wanip    = mArray.wans[i].wanip;
@@ -428,11 +480,13 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					var whois     = mArray.wans[i].whois;
 					var whois6    = mArray.wans[i].whois6;
 					var signal    = mArray.wans[i].signal;
+					var istatus    = mArray.wans[i].status;
 					var multipath = mArray.wans[i].multipath;
 					if(multipath == 'master')
 					{
 						master++;
 					}
+					var zonewan = mArray.wans[i].zonewan;
 					var latency = mArray.wans[i].latency;
 					var mtu = mArray.wans[i].mtu;
 					var operator = mArray.wans[i].operator;
@@ -452,11 +506,13 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					var gw_ping = mArray.wans[i].gw_ping;
 					var gw_ping6 = mArray.wans[i].gw_ping6;
 					var server_ping = mArray.wans[i].server_ping;
+					var server_http = mArray.wans[i].server_http;
 					var ipv6_discover = mArray.wans[i].ipv6_discover;
 					var multipath_available = mArray.wans[i].multipath_available;
 					var multipath_state = mArray.wans[i].multipath_state;
 					var duplicateif = mArray.wans[i].duplicateif;
 					var duplicatemac = mArray.wans[i].duplicatemac;
+					var loop = mArray.wans[i].loop;
 					// Generate template
 					if(mArray.openmptcprouter.remote_from_lease == true && mArray.wans.length == 1)
 					{
@@ -563,12 +619,21 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					{
 						statusMessage += '<%:No Server ping response after 1 second%>' + '<br />';
 					}
-					if (stat == 'Offline' && ipaddr != '' && ipaddr == mArray.wans[i].gateway)
+					if(server_http == 'DOWN' && mArray.openmptcprouter.service_addr !== "")
+					{
+						statusMessage += '<%:No Server http response after 1 second%>' + '<br />';
+					}
+					if(zonewan == "NO")
+					{
+						statusMessage += '<%:Network interface not in WAN firewall zone%>' + '<br />';
+						statusMessageClass = "warning";
+					}
+					if (istatus == 'ERROR' && ipaddr != '' && ipaddr == mArray.wans[i].gateway)
 					{
 						statusMessage += '<%:Wan IP and gateway are identical%>' + '<br />';
 						statusMessageClass = "error";
 					}
-					if (stat == 'Offline' && ip6addr != '' && ip6addr == mArray.wans[i].gateway6)
+					if (istatus == 'ERROR' && ip6addr != '' && ip6addr == mArray.wans[i].gateway6)
 					{
 						statusMessage += '<%:Wan IP and gateway are identical%>' + '<br />';
 						statusMessageClass = "error";
@@ -607,6 +672,10 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 						statusMessage += '<%:Network interface MAC address duplicated%>' + '<br />';
 						statusMessageClass = "error";
 					}
+					if(loop)
+					{
+						statusMessage += '<%:Looping route detected%>' + '<br />';
+					}
 					if(ipv6_discover == 'DETECTED')
 					{
 						statusMessage += '<%:IPv6 route received%>' + '<br />'
@@ -615,6 +684,11 @@ local statuslogo = ucic:get("openmptcprouter","settings","statuslogo") or "openm
 					{
 						statusMessageClass = "warning";
 						statusIcon = "<%=resource%>/openmptcprouter/images/statusWarning.png";
+					}
+					if (statusMessage !== "" && statusMessageClass == "error")
+					{
+						statusMessageClass = "error";
+						statusIcon = "<%=resource%>/openmptcprouter/images/statusError.png";
 					}
 					content += String.format('<%:multipath:%> %s<br />',multipath);
 					if(mArray.wans[i].qos && mArray.wans[i].download > 0 && mArray.wans[i].upload > 0)

@@ -1,6 +1,6 @@
 #
 # Copyright (C) 2017-2018 Yousong Zhou <yszhou4tech@gmail.com>
-# Copyright (C) 2018-2019 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
+# Copyright (C) 2018-2021 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -14,12 +14,11 @@ include $(TOPDIR)/rules.mk
 # - check if default mode has changed from being tcp_only
 #
 PKG_NAME:=shadowsocks-libev
+PKG_RELEASE:=11
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/Ysurac/shadowsocks-libev.git
+PKG_SOURCE_VERSION:=410950d87d8cdf8502d8f59a79dc0ff4c7677543
 PKG_VERSION:=3.3.5
-PKG_RELEASE:=2
-
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://github.com/shadowsocks/shadowsocks-libev/releases/download/v$(PKG_VERSION)
-PKG_HASH:=cfc8eded35360f4b67e18dc447b0c00cddb29cc57a3cec48b135e5fb87433488
 
 PKG_MAINTAINER:=Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 
@@ -45,8 +44,6 @@ endef
 define Package/shadowsocks-libev-config/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DATA) ./files/shadowsocks-libev.config $(1)/etc/config/shadowsocks-libev
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/shadowsocks-libev.init $(1)/etc/init.d/shadowsocks-libev
 endef
 
 
@@ -57,7 +54,7 @@ define Package/shadowsocks-libev/Default
     SUBMENU:=Web Servers/Proxies
     TITLE:=shadowsocks-libev $(1)
     URL:=https://github.com/shadowsocks/shadowsocks-libev
-    DEPENDS:=+libcares +libev +libmbedtls +libpcre +libpthread +libsodium +shadowsocks-libev-config +zlib +libpcap +libcap +libstdcpp +libelf1
+    DEPENDS:=+libcares +libev +libmbedtls +libpcre2 +libpthread +libsodium +shadowsocks-libev-config +zlib +libpcap +libcap +libstdcpp +libelf
   endef
 
   define Package/shadowsocks-libev-$(1)/install
@@ -89,11 +86,15 @@ define Package/shadowsocks-libev-ss-rules/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/ss-rules $(1)/usr/bin
 	$(INSTALL_BIN) ./files/ss-rules6 $(1)/usr/bin
-	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_DIR) $(1)/etc
 	$(INSTALL_DATA) ./files/firewall.ss-rules $(1)/etc
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/ss-rules.defaults $(1)/etc/uci-defaults
-	$(INSTALL_DIR) $(1)/etc/sysctl.d
-	$(INSTALL_DATA) ./files/shadowsocks.conf $(1)/etc/sysctl.d
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/shadowsocks-libev.init $(1)/etc/init.d/shadowsocks-libev
+
+#	$(INSTALL_DIR) $(1)/etc/sysctl.d
+#	$(INSTALL_DATA) ./files/shadowsocks.conf $(1)/etc/sysctl.d
 #	$(INSTALL_DIR) $(1)/usr/lib/shadowsocks-libev
 #	$(INSTALL_DATA) $(PKG_BUILD_DIR)/src/*.ebpf $(1)/usr/lib/shadowsocks-libev
 endef
@@ -107,6 +108,34 @@ uci batch <<-EOF
 	commit firewall
 EOF
 endef
+
+define Package/shadowsocks-libev-ss-rules-nft
+  SECTION:=net
+  CATEGORY:=Network
+  SUBMENU:=Web Servers/Proxies
+  TITLE:=shadowsocks-libev ss-rules NFT
+  URL:=https://github.com/shadowsocks/shadowsocks-libev
+  DEPENDS:=+firewall4 \
+       +ip \
+       +resolveip \
+       +ucode \
+       +ucode-mod-fs \
+       +shadowsocks-libev-ss-redir \
+       +shadowsocks-libev-config \
+       +kmod-nft-tproxy \
+       @!LINUX_5_4
+endef
+
+
+define Package/shadowsocks-libev-ss-rules-nft/install
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./files/ss-rules.defaults $(1)/etc/uci-defaults
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/shadowsocks-libev.init-nft $(1)/etc/init.d/shadowsocks-libev
+	$(INSTALL_DIR) $(1)/usr/share/ss-rules
+	$(INSTALL_DATA) ./files/nft-rules/* $(1)/usr/share/ss-rules/
+endef
+
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
@@ -128,6 +157,7 @@ TARGET_CFLAGS += -I$(STAGING_DIR)/usr/include
 
 $(eval $(call BuildPackage,shadowsocks-libev-config))
 $(eval $(call BuildPackage,shadowsocks-libev-ss-rules))
+$(eval $(call BuildPackage,shadowsocks-libev-ss-rules-nft))
 $(foreach component,$(SHADOWSOCKS_COMPONENTS), \
   $(eval $(call BuildPackage,shadowsocks-libev-$(component))) \
 )

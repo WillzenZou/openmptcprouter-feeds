@@ -9,6 +9,18 @@
 # See /LICENSE for more information.
 #
 
+if [ -f /usr/sbin/iptables-legacy ]; then
+	IPTABLES="/usr/sbin/iptables-legacy"
+	IPTABLESRESTORE="/usr/sbin/iptables-legacy-restore"
+	IPTABLESSAVE="/usr/sbin/iptables-legacy-save"
+else
+	IPTABLES="/usr/sbin/iptables"
+	IPTABLESRESTORE="/usr/sbin/iptables-restore"
+	IPTABLESSAVE="/usr/sbin/iptables-save"
+fi
+
+
+
 v2r_rules_usage() {
 	cat >&2 <<EOF
 Usage: v2ray-rules [options]
@@ -112,17 +124,17 @@ v2r_rules_parse_args() {
 		__errmsg "Requires at least -l or -L option"
 		return 1
 	fi
-	if [ -n "$o_dst_forward_recentrst" ] && ! iptables -m recent -h >/dev/null; then
+	if [ -n "$o_dst_forward_recentrst" ] && ! $IPTABLES -w -m recent -h >/dev/null; then
 		__errmsg "Please install iptables-mod-conntrack-extra with opkg"
 		return 1
 	fi
-	o_remote_servers="$(for s in $o_remote_servers; do resolveip -4 "$s"; done)"
+	o_remote_servers="$(for s in $o_remote_servers; do resolveip -t 5 -4 "$s"; done)"
 }
 
 v2r_rules_flush() {
 	local setname
 
-	iptables-save --counters | grep -v v2r_ | iptables-restore -w --counters
+	$IPTABLESSAVE --counters 2>/dev/null | grep -v v2r_ | $IPTABLESRESTORE --counters
 	while ip rule del fwmark 1 lookup 100 2>/dev/null; do true; done
 	ip route flush table 100 || true
 	for setname in $(ipset -n list | grep "ssr_${rule}"); do
@@ -166,8 +178,8 @@ v2r_rules_iptchains_init() {
 }
 
 v2r_rules_iptchains_init_mark() {
-	if [ "$(iptables -t mangle -L PREROUTING | grep ss_rules_dst_bypass_all)" = "" ]; then
-		iptables-restore -w --noflush <<-EOF
+	if [ "$($IPTABLES -w -t mangle -L PREROUTING | grep ss_rules_dst_bypass_all)" = "" ]; then
+		$IPTABLESRESTORE --noflush <<-EOF
 			*mangle
 			-A PREROUTING -m set --match-set ss_rules_dst_bypass_all dst -j MARK --set-mark 0x539
 			COMMIT
@@ -188,7 +200,7 @@ v2r_rules_iptchains_init_tcp() {
 		bypass|*) return 0;;
 	esac
 
-	iptables-restore -w --noflush <<-EOF
+	$IPTABLESRESTORE --noflush <<-EOF
 		*nat
 		:v2r_${rule}_local_out -
 		-I OUTPUT 1 -p tcp -j v2r_${rule}_local_out
@@ -243,7 +255,7 @@ v2r_rules_iptchains_init_() {
 		forward) dst_default_target=v2r_${rule}_forward ;;
 		bypass|*) dst_default_target=RETURN ;;
 	esac
-	sed -e '/^\s*$/d' -e 's/^\s\+//' <<-EOF | iptables-restore -w --noflush
+	sed -e '/^\s*$/d' -e 's/^\s\+//' <<-EOF | $IPTABLESRESTORE --noflush
 		*$table
 		:v2r_${rule}_pre_src -
 		:v2r_${rule}_src -
@@ -275,7 +287,7 @@ v2r_rules_iptchains_mkprerules() {
 	local proto="$1"
 
 	if [ -z "$o_ifnames" ]; then
-		echo "-I PREROUTING 1 -p $proto -j v2r_${rule}_pre_src"
+		echo "-A PREROUTING -p $proto -j v2r_${rule}_pre_src"
 	else
 		echo $o_ifnames \
 			| tr ' ' '\n' \
@@ -283,7 +295,25 @@ v2r_rules_iptchains_mkprerules() {
 	fi
 }
 
+v2r_rules_fw_drop() {
+	fw3 -4 print 2>/dev/null | awk '/iptables/&&/zone_lan_forward/&&/tcp/&&/-t filter/&&/-j reject/ {for(i=6; i<=NF; i++) { printf "%s ",$i } print "\n" }' |
+	while IFS=$"\n" read -r c; do
+		fwrule=$(echo "$c" | sed 's/reject/REDIRECT --to-ports 65535/')
+		if [ -n "$fwrule" ] && [ -z "$($IPTABLESSAVE 2>/dev/null | grep zone_lan_prerouting | grep '${fwrule}')" ]; then
+			eval "$IPTABLES -w -t nat -A zone_lan_prerouting ${fwrule} 2>&1 >/dev/null"
+		fi
+	done
+	fw3 -4 print 2>/dev/null | awk '/iptables/&&/zone_lan_forward/&&/tcp/&&/-t filter/&&/-j drop/ {for(i=6; i<=NF; i++) { printf "%s ",$i } print "\n" }' |
+	while IFS=$"\n" read -r c; do
+		fwrule=$(echo "$c" | sed 's/drop/REDIRECT --to-ports 65535/')
+		if [ -n "$fwrule" ] && [ -z "$($IPTABLESSAVE 2>/dev/null | grep zone_lan_prerouting | grep '${fwrule}')" ]; then
+			eval "$IPTABLES -t nat -A zone_lan_prerouting ${fwrule} 2>&1 >/dev/null"
+		fi
+	done
+}
+
 v2r_rules_parse_args "$@"
 #v2r_rules_flush
 v2r_rules_ipset_init
 v2r_rules_iptchains_init
+v2r_rules_fw_drop

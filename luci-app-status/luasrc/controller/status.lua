@@ -9,9 +9,9 @@ module("luci.controller.status", package.seeall)
 
 function index()
 	entry({"admin", "system", "status"}, alias("admin", "system", "status", "server"), _("Settings"), 1)
-	entry({"admin", "system", "status","server"}, template("status/server"),_('Settings'),1).leaf = true
+	-- entry({"admin", "system", "status","server"}, template("status/server"),_('Settings'),1).leaf = true
 	entry({"admin", "system", "status","status"}, template("status/wanstatus"),_('Status'),2).leaf = true
-	entry({"admin", "system", "status","server_add"}, post("server_add"))
+	-- entry({"admin", "system", "status","server_add"}, post("server_add"))
 	entry({"admin", "system", "status", "interfaces_status"}, call("interfaces_status")).leaf = true
 	entry({"admin", "system", "status", "multipath_bandwidth"}, call("multipath_bandwidth")).leaf = true
 	entry({"admin", "system", "status", "interface_bandwidth"}, call("interface_bandwidth")).leaf = true
@@ -43,7 +43,7 @@ function server_add()
 			serversnb = serversnb + 1
 		end
 		ucic:set("openmptcprouter",server,"disabled",openmptcprouter_vps_disabled)
-		ucic:set("openmptcprouter",server,"ip",server_ip)
+		ucic:set_list("openmptcprouter",server,"ip",server_ip)
 		ucic:set("openmptcprouter",server,"port","65500")
 		ucic:save("openmptcprouter")
 	end
@@ -295,7 +295,10 @@ function multipath_bandwidth()
 		local label = s["label"]
 		local dev = get_device(intname)
 		if dev == "" then
-			dev = get_device(s["ifname"])
+			dev = get_device(s["device"])
+			if dev == "" then
+				dev = get_device(s["ifname"])
+			end
 		end
 		local multipath = s["multipath"] or ""
 		if dev ~= "lo" and dev ~= "" then

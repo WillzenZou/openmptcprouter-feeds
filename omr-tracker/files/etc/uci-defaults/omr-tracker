@@ -64,6 +64,19 @@ if [ "$(uci -q get omr-tracker.proxy.hosts | grep '176.103.130.130')" != "" ]; t
 		commit omr-tracker
 	EOF
 fi
+if [ "$(uci -q get omr-tracker.proxy.hosts | grep '1.0.0.1')" != "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		del_list omr-tracker.proxy.hosts='1.0.0.1'
+		commit omr-tracker
+	EOF
+fi
+
+if [ "$(uci -q get omr-tracker.proxy.hosts | grep '198.41.212.162')" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		add_list omr-tracker.proxy.hosts='198.41.212.162'
+		commit omr-tracker
+	EOF
+fi
 
 if [ -z "$(uci -q get omr-tracker.defaults.hosts6)" ]; then
 	uci -q batch <<-EOF >/dev/null
@@ -76,6 +89,15 @@ if [ -z "$(uci -q get omr-tracker.defaults.hosts6)" ]; then
 		commit omr-tracker
 	EOF
 fi
+if [ -z "$(uci -q get omr-tracker.proxy.hosts6)" ]; then
+	uci -q batch <<-EOF >/dev/null
+		add_list omr-tracker.proxy.hosts6='2606:4700:4700::1111'
+		add_list omr-tracker.proxy.hosts6='2606:4700:4700::1001'
+		add_list omr-tracker.proxy.hosts6='2620:119:35::35'
+		add_list omr-tracker.proxy.hosts6='2620:119:53::53'
+		commit omr-tracker
+	EOF
+fi
 
 if [ "$(uci -q get omr-tracker.defaults.wait_test)" = "" ]; then
 	uci -q batch <<-EOF >/dev/null
@@ -85,5 +107,61 @@ if [ "$(uci -q get omr-tracker.defaults.wait_test)" = "" ]; then
 		commit omr-tracker
 	EOF
 fi
+
+if [ "$(uci -q get omr-tracker.defaults.server_http_test)" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.defaults.server_http_test=0
+		commit omr-tracker
+	EOF
+fi
+
+if [ "$(uci -q get omr-tracker.defaults.server_test)" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.defaults.server_test=0
+		commit omr-tracker
+	EOF
+fi
+
+if [ -z "$(uci -q get omr-tracker.defaults.failure_interval)" ] || [ "$(uci -q get omr-tracker.defaults.failure_interval)" = "5" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.defaults.failure_interval=20
+		commit omr-tracker
+	EOF
+fi
+
+if [ "$(uci -q get omr-tracker.defaults.family)" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.defaults.initial_state='online'
+		set omr-tracker.defaults.family='ipv4ipv6'
+		set omr-tracker.defaults.reliability='1'
+		set omr-tracker.defaults.interval='1'
+		set omr-tracker.defaults.failure_interval='5'
+		set omr-tracker.defaults.count='1'
+		set omr-tracker.defaults.tries_up='5'
+		set omr-tracker.omrvpn.initial_state='online'
+		set omr-tracker.omrvpn.family='ipv4'
+		set omr-tracker.omrvpn.reliability='1'
+		set omr-tracker.omrvpn.failure_interval='3'
+		set omr-tracker.omrvpn.tries_up='3'
+		set omr-tracker.omrvpn.count='1'
+		set omr-tracker.proxy.initial_state='online'
+		set omr-tracker.proxy.family='ipv4ipv6'
+		set omr-tracker.server.initial_state='online'
+		commit omr-tracker
+	EOF
+fi
+if [ "$(uci -q get omr-tracker.server.type)" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.server.type='apiping'
+		commit omr-tracker
+	EOF
+fi
+if [ -z "$(uci -q get omr-tracker.omrvpn.restart_down)" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set omr-tracker.omrvpn.restart_down='0'
+		commit omr-tracker
+	EOF
+fi
+
 
 exit 0

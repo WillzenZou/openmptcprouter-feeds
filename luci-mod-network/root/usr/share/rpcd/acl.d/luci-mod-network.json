@@ -4,14 +4,19 @@
 		"read": {
 			"cgi-io": [ "exec" ],
 			"file": {
-				"/usr/libexec/luci-peeraddr": [ "exec" ]
+				"/etc/iproute2/rt_tables": [ "read" ],
+				"/proc/sys/net/ipv6/conf/*/mtu": [ "read" ],
+				"/proc/sys/net/ipv6/conf/*/hop_limit": [ "read" ],
+				"/usr/libexec/luci-peeraddr": [ "exec" ],
+				"/proc/sys/net/ipv[46]/conf/*": [ "read" ],
+				"/sys/class/net/*/brport/*": [ "read" ]
 			},
 			"ubus": {
 				"file": [ "exec" ],
 				"iwinfo": [ "assoclist", "countrylist", "freqlist", "txpowerlist" ],
 				"luci": [ "getSwconfigFeatures", "getSwconfigPortState" ]
 			},
-			"uci": [ "dhcp", "firewall", "network", "wireless" ]
+			"uci": [ "dhcp", "firewall", "network", "wireless", "openmptcprouter" ]
 		},
 		"write": {
 			"cgi-io": [ "exec" ],
@@ -54,7 +59,8 @@
 				"/usr/bin/ping": [ "exec" ],
 				"/usr/bin/ping6": [ "exec", "list" ],
 				"/usr/bin/traceroute": [ "exec" ],
-				"/usr/bin/traceroute6": [ "exec", "list" ]
+				"/usr/bin/traceroute6": [ "exec", "list" ],
+				"/usr/bin/arp-scan": [ "exec", "list" ]
 			},
 			"ubus": {
 				"file": [ "exec", "stat" ]

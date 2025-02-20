@@ -1,6 +1,6 @@
 #!/bin/sh
-if [ "$(uci -q get openmptcprouter.latest_versions)" = "" ]; then
-	if [ "$(uci -q get unbound.@unbound[0].listen_port | grep 5353)" = "" ]; then
+if [ "$(uci -q get openmptcprouter.settings.version)" = "" ]; then
+	if [ "$(uci -q get unbound.@unbound[-1].listen_port | grep 5353)" = "" ]; then
 		uci -q batch <<-EOF >/dev/null
 			set unbound.@unbound[-1].listen_port=5353
 			set unbound.@unbound[-1].protocol="ip4_only"
@@ -8,6 +8,11 @@ if [ "$(uci -q get openmptcprouter.latest_versions)" = "" ]; then
 			set unbound.@unbound[-1].recursion="aggressive"
 			set unbound.@unbound[-1].validator='1'
 			set unbound.@unbound[-1].validator_ntp='1'
+			del unbound.@unbound[-1].dns64_prefix
+			del unbound.@unbound[-1].iface_wan
+			del unbound.@unbound[-1].dhcp4_slaac6
+			del unbound.@unbound[-1].query_minimize
+			del unbound.@unbound[-1].query_min_strict
 			commit unbound
 		EOF
 	fi
@@ -15,13 +20,34 @@ if [ "$(uci -q get openmptcprouter.latest_versions)" = "" ]; then
 		uci -q batch <<-EOF >/dev/null
 			add_list dhcp.@dnsmasq[-1].server="127.0.0.1#5353"
 			add_list dhcp.@dnsmasq[-1].server="/lan/"
-			#add_list dhcp.@dnsmasq[-1].server="223.5.5.5"
-			#add_list dhcp.@dnsmasq[-1].server="223.6.6.6"
-			#add_list dhcp.@dnsmasq[-1].server="180.76.76.76"
-			set dhcp.@dnsmasq[-1].dnssec='1'
 			commit dhcp
 		EOF
 	fi
+fi
+if [ -z "$(uci -q get unbound.ub_main)" ]; then
+	uci -q batch <<-EOF >/dev/null
+		rename unbound.@unbound[-1]=ub_main
+		commit unbound
+	EOF
+fi
+# Make unbound listen on loopback only
+if [ -z "$(uci -q get unbound.ub_main.interface)" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set unbound.ub_main.interface_auto='0'
+		set unbound.ub_main.interface='loopback'
+		commit unbound
+	EOF
+fi
+if [ -z "$(uci -q get unbound.ub_dhcp_link)" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set unbound.ub_main.dhcp_link='dnsmasq'
+		del unbound.ub_main.domain_type
+		del unbound.ub_main.add_local_fqdn
+		del unbound.ub_main.add_wan_fqdn
+		del unbound.ub_main.add_extra_dns
+		commit unbound
+	EOF
+
 fi
 if [ "$(uci -q show dhcp | grep 'use-application-dns.net')" = "" ]; then
 	uci -q batch <<-EOF >/dev/null
@@ -39,6 +65,12 @@ if [ "$(uci -q get dhcp.@dnsmasq[0].rebind_domain)" = "" ]; then
 		commit dhcp
 	EOF
 fi
+if [ "$(uci -q get dhcp.@dnsmasq[0].dnsforwardmax)" = "" ]; then
+	uci -q batch <<-EOF >/dev/null
+		set dhcp.@dnsmasq[-1].dnsforwardmax='1500'
+		commit dhcp
+	EOF
+fi
 if [ "$(uci -q get dhcp.lan.dhcp_options)" = "" ]; then
 	uci -q batch <<-EOF >/dev/null
 		uci add_list dhcp.lan.dhcp_option='252,"\n"'
@@ -46,21 +78,12 @@ if [ "$(uci -q get dhcp.lan.dhcp_options)" = "" ]; then
 	EOF
 fi
 
-if [ "$(uci -q get openmptcprouter.latest_versions)" = "" ]; then
-#	uci -q batch <<-EOF >/dev/null
-#		delete https-dns-proxy.@https-dns-proxy[-1]
-#		delete https-dns-proxy.@https-dns-proxy[-1]
-#		commit https-dns-proxy
-#	EOF
+if [ -n "$(uci -q get dhcp.@dnsmasq[0].server | grep 127.0.0.1)" ] && [ -z "$(uci -q get dhcp.@dnsmasq[0].server | grep 127.0.0.1#5353)" ]; then
+	/etc/init.d/https-dns-proxy start
+	/etc/init.d/https-dns-proxy enable
+else
 	/etc/init.d/https-dns-proxy stop
 	/etc/init.d/https-dns-proxy disable
-#		set https-dns-proxy.@https-dns-proxy[-1]=https-dns-proxy
-#		set https-dns-proxy.@https-dns-proxy[-1].listen_addr='127.0.0.1'
-#		set https-dns-proxy.@https-dns-proxy[-1].user='nobody'
-#		set https-dns-proxy.@https-dns-proxy[-1].group='nogroup'
-#		set https-dns-proxy.@https-dns-proxy[-1].bootstrap_dns='1.1.1.1,1.0.0.1'
-#		set https-dns-proxy.@https-dns-proxy[-1].resolver_url='https://cloudflare-dns.com/dns-query'
-#		set https-dns-proxy.@https-dns-proxy[-1].listen_port='5354'
 fi
 
 #uci -q batch <<-EOF >/dev/null
@@ -72,8 +95,9 @@ fi
 #	commit unbound
 #EOF
 
-if [ -z "$(uci -q unbound.auth_icann)" ]; then
+if [ -z "$(uci -q show unbound.auth_icann)" ]; then
 	uci -q batch <<-EOF >/dev/null
+		del unbound.auth_icann
 		set unbound.auth_icann=zone
 		set unbound.auth_icann.fallback='1'
 		set unbound.auth_icann.url_dir='https://www.internic.net/domain/'
@@ -85,6 +109,7 @@ if [ -z "$(uci -q unbound.auth_icann)" ]; then
 		add_list unbound.auth_icann.zone_name='in-addr.arpa.'
 		add_list unbound.auth_icann.zone_name='ip6.arpa.'
 		set unbound.auth_icann.enabled='1'
+		del unbound.fwd_isp
 		set unbound.fwd_isp=zone
 		set unbound.fwd_isp.enabled='0'
 		set unbound.fwd_isp.fallback='1'
@@ -92,6 +117,7 @@ if [ -z "$(uci -q unbound.auth_icann)" ]; then
 		set unbound.fwd_isp.zone_type='forward_zone'
 		add_list unbound.fwd_isp.zone_name='isp-bill.example.com.'
 		add_list unbound.fwd_isp.zone_name='isp-mail.example.net.'
+		del unbound.fwd_google
 		set unbound.fwd_google=zone
 		set unbound.fwd_google.enabled='0'
 		set unbound.fwd_google.fallback='1'
@@ -103,6 +129,7 @@ if [ -z "$(uci -q unbound.auth_icann)" ]; then
 		add_list unbound.fwd_google.server='2001:4860:4860::8844'
 		add_list unbound.fwd_google.server='2001:4860:4860::8888'
 		set unbound.fwd_google.zone_name='.'
+		del unbound.fwd_cloudflare
 		set unbound.fwd_cloudflare=zone
 		set unbound.fwd_cloudflare.enabled='0'
 		set unbound.fwd_cloudflare.fallback='1'
@@ -209,6 +236,14 @@ if [ -z "$(uci -q get unbound.fwd_adguard_family)" ]; then
 		add_list unbound.fwd_quad9_secured.server='149.112.112.9'
 		set unbound.fwd_quad9_secured.zone_name='.'
 	EOF
+fi
+
+if [ -z "$(grep nameserver /etc/resolv.conf)" ]; then
+	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+fi
+
+if [ -z "$(grep unknown-server-time-limit /etc/unbound/unbound_srv.conf)" ]; then
+	echo "unknown-server-time-limit: 2500" > /etc/unbound/unbound_srv.conf
 fi
 
 rm -f /tmp/luci-indexcache

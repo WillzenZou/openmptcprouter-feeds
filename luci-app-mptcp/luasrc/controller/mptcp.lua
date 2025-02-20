@@ -1,17 +1,25 @@
 -- Copyright 2008 Steven Barth <steven@midlink.org>
 -- Copyright 2011 Jo-Philipp Wich <jow@openwrt.org>
--- Copyright 2018 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
+-- Copyright 2018-2023 Ycarus (Yannick Chabanois) <ycarus@zugaina.org>
 -- Licensed to the public under the Apache License 2.0.
 
 module("luci.controller.mptcp", package.seeall)
 
+
 function index()
+	local uname = nixio.uname()
 	entry({"admin", "network", "mptcp"}, alias("admin", "network", "mptcp", "settings"), _("MPTCP"))
-	entry({"admin", "network", "mptcp", "settings"}, cbi("mptcp"), _("Settings"),2).leaf = true
+	if uname ~= nil and uname.release:sub(1,1) == "5" then
+		entry({"admin", "network", "mptcp", "settings"}, cbi("mptcp"), _("Settings"),2).leaf = true
+	else
+		entry({"admin", "network", "mptcp", "settings"}, view("mptcp/mptcp"), _("Settings"),2).leaf = true
+	end
 	entry({"admin", "network", "mptcp", "bandwidth"}, template("mptcp/multipath"), _("Bandwidth"), 3).leaf = true
 	entry({"admin", "network", "mptcp", "multipath_bandwidth"}, call("multipath_bandwidth")).leaf = true
 	entry({"admin", "network", "mptcp", "interface_bandwidth"}, call("interface_bandwidth")).leaf = true
-	entry({"admin", "network", "mptcp", "mptcp_check"}, template("mptcp/mptcp_check"), _("MPTCP Support Check"), 4).leaf = true
+	if uname ~= nil and uname.release:sub(1,1) == "5" then
+		entry({"admin", "network", "mptcp", "mptcp_check"}, template("mptcp/mptcp_check"), _("MPTCP Support Check"), 4).leaf = true
+	end
 	entry({"admin", "network", "mptcp", "mptcp_check_trace"}, post("mptcp_check_trace")).leaf = true
 	entry({"admin", "network", "mptcp", "mptcp_fullmesh"}, template("mptcp/mptcp_fullmesh"), _("MPTCP Fullmesh"), 5).leaf = true
 	entry({"admin", "network", "mptcp", "mptcp_fullmesh_data"}, post("mptcp_fullmesh_data")).leaf = true
@@ -63,7 +71,10 @@ function multipath_bandwidth()
 		local label = s["label"]
 		local dev = get_device(intname)
 		if dev == "" then
-			dev = get_device(s["ifname"])
+			dev = get_device(s["device"])
+			if dev == "" then
+				dev = get_device(s["ifname"])
+			end
 		end
 		local multipath = s["multipath"] or ""
 		if dev ~= "lo" and dev ~= "" then
@@ -74,7 +85,6 @@ function multipath_bandwidth()
 				multipath = "off"
 			end
 			if multipath == "on" or multipath == "master" or multipath == "backup" or multipath == "handover" then
-				local bwc = luci.sys.exec("luci-bwc -i %q 2>/dev/null" % dev) or ""
 				local bwc = luci.sys.exec("luci-bwc -i %q 2>/dev/null" % dev) or ""
 				if bwc ~= nil then
 					--result[dev] = "[" .. string.gsub(bwc, '[\r\n]', '') .. "]"
@@ -118,20 +128,16 @@ function multipath_bandwidth()
 			for i=1,60 do
 				res[key][i] = string.split(res[key][i], ",")
 				for j=1,5 do
-					if "string"== type(res[key][i][j]) then
-						res[key][i][j]= tonumber(res[key][i][j])
-					end
-					if "string"==type(res["total"][i][j]) then
-						res["total"][i][j]= tonumber(res["total"][i][j])
-					end
+					res[key][i][j]= tonumber(res[key][i][j])
+					res["total"][i][j]= tonumber(res["total"][i][j])
 					if j ==1 then
-						if res[key][i][j] ~= nil then
+						if res[key][i][j] ~= nil and res[key][i][j] > 0 then
 							res["total"][i][j] = res[key][i][j]
 						else
 							res["total"][i][j] = 0
 						end
 					else
-						if res[key][i][j] ~= nil then
+						if res[key][i][j] ~= nil and res[key][i][j] > 0 then
 							res["total"][i][j] = res["total"][i][j] + res[key][i][j]
 						end
 					end
@@ -211,8 +217,8 @@ end
 function mptcp_monitor_data()
 	luci.http.prepare_content("text/plain")
 	local fullmesh
-	fullmesh = io.popen("cat /proc/net/mptcp_net/snmp")
-	if fullmesh then
+	fullmesh = io.popen("multipath -m")
+	if fullmesh:read() ~= nil then
 		while true do
 			local ln = fullmesh:read("*l")
 			if not ln then break end
@@ -227,7 +233,7 @@ function mptcp_connections_data()
 	luci.http.prepare_content("text/plain")
 	local connections
 	connections = io.popen("multipath -c")
-	if connections then
+	if connections:read() ~= nil then
 		while true do
 			local ln = connections:read("*l")
 			if not ln then break end

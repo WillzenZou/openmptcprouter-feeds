@@ -1,0 +1,14 @@
+#!/bin/sh
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+#[ -n "$(pgrep -f 'omr-schedule')" ] && exit 0
+
+for schedule_bin in /usr/share/omr/schedule.d/*; do
+	[ -x "$schedule_bin" ] && (
+		_log() {
+			logger -t "omr-schedule-${schedule_bin##*/}" "$*"
+		}
+		. "$schedule_bin" 2>&1
+	)
+done

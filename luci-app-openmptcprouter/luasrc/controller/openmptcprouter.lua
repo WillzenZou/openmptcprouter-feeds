@@ -26,12 +26,27 @@ end
 function interface_from_device(dev)
 	for _, iface in ipairs(net:get_networks()) do
 		local ifacen = iface:name()
-		local ifacename = ucic:get("network",ifacen,"ifname")
+		local ifacename = ""
+		ifacename = ucic:get("network",ifacen,"device")
+		if ifacename == "" then
+			ifacename = ucic:get("network",ifacen,"ifname")
+		end
 		if ifacename == dev then
 			return ifacen
 		end
 	end
 	return ""
+end
+
+function uci_device_from_interface(intf)
+	intfname = ucic:get("network",intf,"device")
+	deviceuci = ""
+	ucic:foreach("network", "device", function(s)
+		if intfname == ucic:get("network",s[".name"],"name") then
+		    deviceuci = s[".name"]
+		end
+	end)
+	return deviceuci
 end
 
 function wizard_add()
@@ -80,6 +95,7 @@ function wizard_add()
 		end)
 		if nbserver == 1 and server_ip ~= "" and server_ip ~= nil then
 			ucic:set("shadowsocks-libev","sss0","server",server_ip)
+			ucic:set("shadowsocks-rust","sss0","server",server_ip)
 			ucic:set("glorytun","vpn","host",server_ip)
 			ucic:set("glorytun-udp","vpn","host",server_ip)
 			ucic:set("dsvpn","vpn","host",server_ip)
@@ -113,7 +129,10 @@ function wizard_add()
 		end)
 		local defif = "eth0"
 		if add_interface_ifname == "" then
-			local defif1 = ucic:get("network","wan1_dev","ifname") or ""
+			local defif1 = ucic:get("network","wan1_dev","device") or ""
+			if defif1 == "" then
+				defif1 = ucic:get("network","wan1_dev","ifname") or ""
+			end
 			if defif1 ~= "" then
 				defif = defif1
 			end
@@ -126,17 +145,30 @@ function wizard_add()
 		if ointf ~= "" then
 			if ucic:get("network",ointf,"type") == "" then
 				ucic:set("network",ointf,"type","macvlan")
+				ucic:set("network",ointf,"device",ointf)
+				ucic:set("network",ointf .. "_dev","device")
+				ucic:set("network",ointf .. "_dev","type","macvlan")
+				ucic:set("network",ointf .. "_dev","mode","vepa")
+				ucic:set("network",ointf .. "_dev","ifname",defif)
+				ucic:set("network",ointf .. "_dev","name",ointf)
 			end
 			wanif = "wan" .. i
 		end
 		
 		ucic:set("network","wan" .. i,"interface")
-		ucic:set("network","wan" .. i,"ifname",defif)
+		ucic:set("network","wan" .. i,"device",defif)
 		ucic:set("network","wan" .. i,"proto","static")
 		ucic:set("openmptcprouter","wan" .. i,"interface")
 		if ointf ~= "" then
 			ucic:set("network","wan" .. i,"type","macvlan")
+			ucic:set("network","wan" .. i,"device","wan" .. i)
 			ucic:set("network","wan" .. i,"masterintf",defif)
+			ucic:set("network","wan" .. i .. "_dev","device")
+			ucic:set("network","wan" .. i .. "_dev","type","macvlan")
+			ucic:set("network","wan" .. i .. "_dev","mode","vepa")
+			ucic:set("network","wan" .. i .. "_dev","ifname",defif)
+			ucic:set("network","wan" .. i .. "_dev","name","wan" .. i)
+			ucic:set("network","wan" .. i .. "_dev","txqueuelen","1000")
 		end
 		ucic:set("network","wan" .. i,"ip4table","wan")
 		if multipath_master then
@@ -167,17 +199,17 @@ function wizard_add()
 		else
 			ucic:set("sqm","wan" .. i,"interface",defif)
 		end
-		ucic:set("sqm","wan" .. i,"qdisc","fq_codel")
-		ucic:set("sqm","wan" .. i,"script","simple.qos")
+		ucic:set("sqm","wan" .. i,"qdisc","cake")
+		ucic:set("sqm","wan" .. i,"script","piece_of_cake.qos")
 		ucic:set("sqm","wan" .. i,"qdisc_advanced","0")
 		ucic:set("sqm","wan" .. i,"linklayer","none")
-		ucic:set("sqm","wan" .. i,"enabled","0")
+		ucic:set("sqm","wan" .. i,"enabled","1")
 		ucic:set("sqm","wan" .. i,"debug_logging","0")
 		ucic:set("sqm","wan" .. i,"verbosity","5")
 		ucic:set("sqm","wan" .. i,"download","0")
 		ucic:set("sqm","wan" .. i,"upload","0")
-		ucic:set("sqm","wan" .. i,"iqdisc_opts","autorate-ingress nat dual-dsthost")
-		ucic:set("sqm","wan" .. i,"eqdisc_opts","nat dual-srchost")
+		ucic:set("sqm","wan" .. i,"iqdisc_opts","autorate-ingress dual-dsthost")
+		ucic:set("sqm","wan" .. i,"eqdisc_opts","dual-srchost")
 		ucic:save("sqm")
 		ucic:commit("sqm")
 		
@@ -197,7 +229,10 @@ function wizard_add()
 	local delete_intf = luci.http.formvaluetable("delete") or ""
 	if delete_intf ~= "" then
 		for intf, _ in pairs(delete_intf) do
-			local defif = ucic:get("network",intf,"ifname")
+			local defif = ucic:get("network",intf,"ifname") or ""
+			if defif == "" then
+				defif = ucic:get("network",intf,"ifname")
+			end
 			ucic:delete("network",intf)
 			if ucic:get("network",intf .. "_dev") ~= "" then
 				ucic:delete("network",intf .. "_dev")
@@ -223,7 +258,14 @@ function wizard_add()
 		end
 	end
 
+	-- Enable/disable IPv6
+	local disableipv6 = luci.http.formvalue("enableipv6") or "1"
+	ucic:set("openmptcprouter","settings","disable_ipv6",disableipv6)
+
+
 	-- Set interfaces settings
+	local downloadmax = 0
+	local uploadmax = 0
 	local interfaces = luci.http.formvaluetable("intf")
 	for intf, _ in pairs(interfaces) do
 		local label = luci.http.formvalue("cbid.network.%s.label" % intf) or ""
@@ -249,8 +291,11 @@ function wizard_add()
 		local auth = luci.http.formvalue("cbid.network.%s.auth" % intf) or ""
 		local mode = luci.http.formvalue("cbid.network.%s.mode" % intf) or ""
 		local sqmenabled = luci.http.formvalue("cbid.sqm.%s.enabled" % intf) or "0"
+		local sqmautorate = luci.http.formvalue("cbid.sqm.%s.autorate" % intf) or "0"
+		local qosenabled = luci.http.formvalue("cbid.qos.%s.enabled" % intf) or "0"
 		local multipath = luci.http.formvalue("cbid.network.%s.multipath" % intf) or "on"
 		local lan = luci.http.formvalue("cbid.network.%s.lan" % intf) or "0"
+		local ttl = luci.http.formvalue("cbid.network.%s.ttl" % intf) or ""
 		if typeintf ~= "" then
 			if typeintf == "normal" then
 				typeintf = ""
@@ -262,15 +307,52 @@ function wizard_add()
 		end
 		if typeintf == "macvlan" and masterintf ~= "" then
 			ucic:set("network",intf,"type","macvlan")
+			ucic:set("network",intf .. "_dev","device")
+			ucic:set("network",intf .. "_dev","type","macvlan")
+			ucic:set("network",intf .. "_dev","ifname",masterintf)
+			ucic:set("network",intf .. "_dev","mode","vepa")
+			ucic:set("network",intf .. "_dev","name",intf)
+			ucic:set("network",intf,"device",intf)
 			ucic:set("network",intf,"masterintf",masterintf)
 		elseif typeintf == "" and ifname ~= "" and (proto == "static" or proto == "dhcp" or proto == "dhcpv6") then
-			ucic:set("network",intf,"ifname",ifname)
+			ucic:set("network",intf,"device",ifname)
+			if uci_device_from_interface(intf) == "" then
+				ucic:set("network",intf .. "_dev","device")
+				ucic:set("network",intf .. "_dev","name",ifname)
+			end
 		elseif typeintf == "" and device ~= "" and proto == "ncm" then
 			ucic:set("network",intf,"device",device_ncm)
+			if uci_device_from_interface(intf) == "" then
+				ucic:set("network",intf .. "_dev","device")
+				ucic:set("network",intf .. "_dev","name",device_ncm)
+			end
 		elseif typeintf == "" and device ~= "" and proto == "qmi" then
 			ucic:set("network",intf,"device",device_qmi)
+			if uci_device_from_interface(intf) == "" then
+				ucic:set("network",intf .. "_dev","device")
+				ucic:set("network",intf .. "_dev","name",device_qmi)
+			end
 		elseif typeintf == "" and device ~= "" and proto == "modemmanager" then
 			ucic:set("network",intf,"device",device_manager)
+			if uci_device_from_interface(intf) == "" then
+				ucic:set("network",intf .. "_dev","device")
+				ucic:set("network",intf .. "_dev","name",device_manager)
+			end
+		elseif typeintf == "" and ifname ~= "" and proto == "static" then
+			ucic:set("network",intf,"device",ifname)
+			if uci_device_from_interface(intf) == "" then
+				ucic:set("network",intf .. "_dev","device")
+				ucic:set("network",intf .. "_dev","name",ifname)
+			end
+		end
+		if typeintf ~= "macvlan" then
+			if ucic:get("network",intf .. "_dev","type") == "macvlan" then
+				ucic:delete("network",intf .. "_dev","type")
+				ucic:delete("network",intf .. "_dev","mode")
+				ucic:delete("network",intf .. "_dev","ifname")
+				ucic:delete("network",intf .. "_dev","macaddr")
+			end
+			ucic:delete("network",intf,"masterintf")
 		end
 		if proto == "pppoe" then
 			ucic:set("network",intf,"pppd_options","persist maxfail 0")
@@ -278,6 +360,14 @@ function wizard_add()
 		if proto ~= "other" then
 			ucic:set("network",intf,"proto",proto)
 		end
+
+		uci_device = uci_device_from_interface(intf)
+		if uci_device == "" then
+			uci_device = intf .. "_dev"
+			ucic:set("network",uci_device,"device")
+		end
+		ucic:set("network",uci_device,"ttl",ttl)
+
 		ucic:set("network",intf,"apn",apn)
 		ucic:set("network",intf,"pincode",pincode)
 		ucic:set("network",intf,"delay",delay)
@@ -295,21 +385,28 @@ function wizard_add()
 		end
 		ucic:set("network",intf,"defaultroute",0)
 		ucic:set("network",intf,"peerdns",0)
+		ucic:set("network",intf,"delegate",0)
 		if ipaddr ~= "" then
-			ucic:set("network",intf,"ipaddr",ipaddr)
-			ucic:set("network",intf,"netmask",netmask)
-			ucic:set("network",intf,"gateway",gateway)
+			ucic:set("network",intf,"ipaddr",ipaddr:gsub("%s+", ""))
+			ucic:set("network",intf,"netmask",netmask:gsub("%s+", ""))
+			ucic:set("network",intf,"gateway",gateway:gsub("%s+", ""))
 		else
 			ucic:set("network",intf,"ipaddr","")
 			ucic:set("network",intf,"netmask","")
 			ucic:set("network",intf,"gateway","")
 		end
 		if ip6addr ~= "" then
-			ucic:set("network",intf,"ip6addr",ip6addr)
-			ucic:set("network",intf,"ip6gw",ip6gw)
+			ucic:set("network",intf,"ip6addr",ip6addr:gsub("%s+", ""))
+			ucic:set("network",intf,"ip6gw",ip6gw:gsub("%s+", ""))
+			ucic:set("network",intf,"ipv6","1")
+		elseif proto ~= "static" and proto ~= "dhcp" and disableipv6 ~= "1" then
+			ucic:set("network",intf,"ip6addr","")
+			ucic:set("network",intf,"ip6gw","")
+			ucic:set("network",intf,"ipv6","1")
 		else
 			ucic:set("network",intf,"ip6addr","")
 			ucic:set("network",intf,"ip6gw","")
+			ucic:set("network",intf,"ipv6","0")
 		end
 		
 		if proto == "dhcpv6" then
@@ -330,8 +427,10 @@ function wizard_add()
 
 		local downloadspeed = luci.http.formvalue("cbid.sqm.%s.download" % intf) or "0"
 		local uploadspeed = luci.http.formvalue("cbid.sqm.%s.upload" % intf) or "0"
+		local testspeed = luci.http.formvalue("cbid.sqm.%s.testspeed" % intf) or "0"
 
-		if not ucic:get("qos",intf) ~= "" then
+		local qos_settings = ucic:get("qos",intf) or ""
+		if qos_settings == "" then
 			ucic:set("qos",intf,"interface")
 			ucic:set("qos",intf,"classgroup","Default")
 			ucic:set("qos",intf,"enabled","0")
@@ -339,54 +438,85 @@ function wizard_add()
 			ucic:set("qos",intf,"download","100000")
 		end
 
-		if not ucic:get("sqm",intf) ~= "" then
+		local sqm_settings = ucic:get("sqm",intf) or ""
+		if sqm_settings == "" then
 			local defif = get_device(intf)
 			if defif == "" then
-				defif = ucic:get("network",intf,"ifname") or ""
+				defif = ucic:get("network",intf,"device") or ""
+				if defif == "" then
+					defif = ucic:get("network",intf,"ifname") or ""
+				end
 			end
 			ucic:set("sqm",intf,"queue")
 			ucic:set("sqm",intf,"interface",defif)
-			ucic:set("sqm",intf,"qdisc","fq_codel")
-			ucic:set("sqm",intf,"script","simple.qos")
+			ucic:set("sqm",intf,"qdisc","cake")
+			ucic:set("sqm",intf,"script","piece_of_cake.qos")
 			ucic:set("sqm",intf,"qdisc_advanced","0")
-			ucic:set("sqm",intf,"linklayer","none")
+			ucic:set("sqm",intf,"linklayer","atm")
+			ucic:set("sqm",intf,"overhead","44")
 			ucic:set("sqm",intf,"enabled","0")
 			ucic:set("sqm",intf,"debug_logging","0")
 			ucic:set("sqm",intf,"verbosity","5")
 			ucic:set("sqm",intf,"download","0")
 			ucic:set("sqm",intf,"upload","0")
-			ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress nat dual-dsthost")
-			ucic:set("sqm",intf,"eqdisc_opts","nat dual-srchost")
+			ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress")
+			--ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress dual-dsthost")
+			--ucic:set("sqm",intf,"eqdisc_opts","dual-srchost")
 		end
+		ucic:set("sqm",intf,"autorate",sqmautorate)
 
+		if sqmautorate == "1" then
+			ucic:set("sqm",intf,"qdisc","cake")
+			ucic:set("sqm",intf,"script","piece_of_cake.qos")
+		end
+		ucic:set("openmptcprouter",intf,"testspeed",testspeed)
+		if testspeed == "1" then
+			ucic:delete("openmptcprouter",intf,"testspeed_lc")
+		end
 		if downloadspeed ~= "0" and downloadspeed ~= "" then
+			if sqmautorate == "1" and (ucic:get("network",intf,"downloadspeed") ~= downloadspeed or ucic:get("sqm",intf,"max_download") == "" or ucic:get("sqm",intf,"download") == "0") then
+				ucic:set("sqm",intf,"download",math.ceil(downloadspeed*65/100))
+				ucic:set("sqm",intf,"min_download",math.ceil(downloadspeed*10/100))
+				ucic:set("sqm",intf,"max_download",downloadspeed)
+			elseif sqmautorate ~= "1" then
+				ucic:set("sqm",intf,"download",math.ceil(downloadspeed*95/100))
+			end
 			ucic:set("network",intf,"downloadspeed",downloadspeed)
-			ucic:set("sqm",intf,"download",math.ceil(downloadspeed*95/100))
 			ucic:set("qos",intf,"download",math.ceil(downloadspeed*95/100))
+			downloadmax = downloadmax + tonumber(downloadspeed)
 		else
+			ucic:delete("network",intf,"downloadspeed")
 			ucic:set("sqm",intf,"download","0")
 			ucic:set("qos",intf,"download","0")
 		end
 		if uploadspeed ~= "0" and uploadspeed ~= "" then
+			if sqmautorate == "1" and (ucic:get("network",intf,"uploadspeed") ~= uploadspeed or ucic:get("sqm",intf,"max_upload") == "" or ucic:get("sqm",intf,"upload") == "0") then
+				ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*65/100))
+				ucic:set("sqm",intf,"min_upload",math.ceil(uploadspeed*10/100))
+				ucic:set("sqm",intf,"max_upload",uploadspeed)
+			elseif sqmautorate ~= "1" then
+				ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*95/100))
+			end
 			ucic:set("network",intf,"uploadspeed",uploadspeed)
-			ucic:set("sqm",intf,"upload",math.ceil(uploadspeed*95/100))
 			ucic:set("qos",intf,"upload",math.ceil(uploadspeed*95/100))
+			uploadmax = uploadmax + tonumber(uploadspeed)
 		else
+			ucic:delete("network",intf,"uploadspeed")
 			ucic:set("sqm",intf,"upload","0")
 			ucic:set("qos",intf,"upload","0")
 		end
-		if downloadspeed ~= "0" and downloadspeed ~= "" and uploadspeed ~= "0" and uploadspeed ~= "" then
-			ucic:set("sqm",intf,"enabled","0")
-			ucic:set("qos",intf,"enabled","0")
-		end
 
 		if sqmenabled == "1" then
-			ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress nat dual-dsthost")
-			ucic:set("sqm",intf,"eqdisc_opts","nat dual-srchost")
+			ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress")
+			--ucic:set("sqm",intf,"iqdisc_opts","autorate-ingress dual-dsthost")
+			--ucic:set("sqm",intf,"eqdisc_opts","dual-srchost")
 			ucic:set("sqm",intf,"enabled","1")
-			ucic:set("qos",intf,"enabled","1")
 		else
 			ucic:set("sqm",intf,"enabled","0")
+		end
+		if qosenabled == "1" then
+			ucic:set("qos",intf,"enabled","1")
+		else
 			ucic:set("qos",intf,"enabled","0")
 		end
 	end
@@ -403,9 +533,6 @@ function wizard_add()
 	ucic:save("network")
 	ucic:commit("network")
 
-	-- Enable/disable IPv6
-	local disableipv6 = luci.http.formvalue("enableipv6") or "1"
-	ucic:set("openmptcprouter","settings","disable_ipv6",disableipv6)
 	--local ut = require "luci.util"
 	--local result = ut.ubus("openmptcprouter", "set_ipv6_state", { disable_ipv6 = disableipv6 })
 	local ula = luci.http.formvalue("ula") or ""
@@ -425,7 +552,7 @@ function wizard_add()
 		vpn_intf = "mlvpn0"
 		ucic:set("network","omrvpn","proto","dhcp")
 	elseif default_vpn == "ubond" then
-		vpn_port = 65201
+		vpn_port = 65251
 		vpn_intf = "ubond0"
 		ucic:set("network","omrvpn","proto","dhcp")
 	elseif default_vpn == "dsvpn" then
@@ -440,8 +567,24 @@ function wizard_add()
 		vpn_intf = "bonding-omrvpn"
 		ucic:set("network","omrvpn","proto","bonding")
 	end
+	--if downloadmax ~= 0 and uploadmax ~= 0 then
+	--	ucic:set("sqm","omrvpn","enabled","1")
+	--	ucic:set("sqm","omrvpn","max_download",downloadmax)
+	--	ucic:set("sqm","omrvpn","max_upload",uploadmax)
+	--	ucic:set("sqm","omrvpn","download",math.ceil(downloadmax*50/100))
+	--	ucic:set("sqm","omrvpn","min_download",math.ceil(downloadmax*8/100))
+	--	ucic:set("sqm","omrvpn","upload",math.ceil(uploadmax*50/100))
+	--	ucic:set("sqm","omrvpn","min_upload",math.ceil(uploadmax*8/100))
+	--else
+	--	ucic:set("sqm","omrvpn","enabled","0")
+	--end
+
+	ucic:set("sqm","omrvpn","enabled","0")
+	ucic:set("sqm","omrvpn","download","0")
+	ucic:set("sqm","omrvpn","upload","0")
+
 	if vpn_intf ~= "" then
-		ucic:set("network","omrvpn","ifname",vpn_intf)
+		ucic:set("network","omrvpn","device",vpn_intf)
 		ucic:set("sqm","omrvpn","interface",vpn_intf)
 		ucic:save("network")
 		ucic:commit("network")
@@ -479,10 +622,13 @@ function wizard_add()
 				ucic:set("openmptcprouter",server,"get_config","1")
 			end
 			ucic:set("openmptcprouter",server,"master","1")
+			ucic:set("openmptcprouter",server,"current","1")
 			ucic:set("openmptcprouter",server,"backup","0")
+			ucic:set("xray","omrout","s_shadowsocks_email",openmptcprouter_vps_username:gsub("%s+", ""))
 		else
 			ucic:set("openmptcprouter",server,"get_config","0")
 			ucic:set("openmptcprouter",server,"master","0")
+			ucic:set("openmptcprouter",server,"current","0")
 			ucic:set("openmptcprouter",server,"backup","1")
 		end
 		if openmptcprouter_vps_disabled == "1" then
@@ -492,11 +638,21 @@ function wizard_add()
 			serversnb = serversnb + 1
 		end
 		ucic:set("openmptcprouter",server,"server")
-		ucic:set("openmptcprouter",server,"username",openmptcprouter_vps_username)
-		ucic:set("openmptcprouter",server,"password",openmptcprouter_vps_key)
+		ucic:set("openmptcprouter",server,"username",openmptcprouter_vps_username:gsub("%s+", ""))
+		ucic:set("openmptcprouter",server,"password",openmptcprouter_vps_key:gsub("%s+", ""))
 		ucic:set("openmptcprouter",server,"disabled",openmptcprouter_vps_disabled)
-		ucic:set_list("openmptcprouter",server,"ip",aserverips)
+		if ucic:get_list("openmptcprouter",server,"ip") ~= aserverips then
+			ucic:set_list("openmptcprouter",server,"ip",aserverips)
+			if ucic:get("openmptcprouter",server,"master") == "1" then
+				ucic:set("openmptcprouter",server,"get_config","1")
+			end
+		end
 		ucic:set("openmptcprouter",server,"port","65500")
+		ucic:set("openmptcprouter",server,"set_firewall","1")
+		ucic:delete("openmptcprouter",server,"detected_ss_ipv4")
+		ucic:delete("openmptcprouter",server,"detected_ss_ipv6")
+		ucic:delete("openmptcprouter",server,"detected_public_ipv4")
+		ucic:delete("openmptcprouter",server,"detected_public_ipv6")
 		ucic:save("openmptcprouter")
 	end
 
@@ -505,42 +661,135 @@ function wizard_add()
 	ucic:set("openmptcprouter","settings","mptcpovervpn",mptcpovervpn_vpn)
 	ucic:save("openmptcprouter")
 
+	-- Get Country
+	local country = luci.http.formvalue("country") or "world"
+	ucic:set("openmptcprouter","settings","country",country)
+	ucic:save("openmptcprouter")
+
+	-- Get DNS64
+	local dns64 = luci.http.formvalue("dns64") or "0"
+	ucic:set("openmptcprouter","settings","dns64",dns64)
+	ucic:save("openmptcprouter")
+	if dns64 == "1" then
+		ucic:set("unbound","ub_main","dns64","1")
+		ucic:set("unbound","ub_main","validator","0")
+	else
+		ucic:set("unbound","ub_main","dns64","0")
+	
+	end
+	ucic:save("unbound")
+	ucic:commit("unbound")
+
 	-- Get Proxy set by default
-	local default_proxy = luci.http.formvalue("default_proxy") or "shadowsocks"
+	local default_proxy = luci.http.formvalue("default_proxy") or "shadowsocks-rust"
 	if default_proxy == "shadowsocks" and serversnb > 0 and serversnb > disablednb then
 		--ucic:set("shadowsocks-libev","sss0","disabled","0")
 		ucic:set("v2ray","main","enabled","0")
+		ucic:set("xray","main","enabled","0")
 		ucic:foreach("shadowsocks-libev", "server", function(s)
 			local sectionname = s[".name"]
-			if sectionname:match("^sss.*") then
+			if sectionname:match("^sss.*") and ucic:get("shadowsocks-libev",sectionname,"server") ~= "" then
 				ucic:set("shadowsocks-libev",sectionname,"disabled","0")
 			end
 		end)
-	elseif default_proxy == "v2ray" and serversnb > 0 and serversnb > disablednb then
-		--ucic:set("shadowsocks-libev","sss0","disabled","1")
-		ucic:set("v2ray","main","enabled","1")
+		ucic:foreach("shadowsocks-rust", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-rust",sectionname,"disabled","1")
+		end)
+	elseif default_proxy == "shadowsocks-rust" and serversnb > 0 and serversnb > disablednb then
+		--ucic:set("shadowsocks-libev","sss0","disabled","0")
+		ucic:set("v2ray","main","enabled","0")
+		ucic:set("xray","main","enabled","0")
+		ucic:foreach("shadowsocks-rust", "server", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^sss.*") and ucic:get("shadowsocks-rust",sectionname,"server") ~= "" then
+				ucic:set("shadowsocks-rust",sectionname,"disabled","0")
+			end
+		end)
 		ucic:foreach("shadowsocks-libev", "server", function(s)
 			local sectionname = s[".name"]
 			ucic:set("shadowsocks-libev",sectionname,"disabled","1")
+		end)
+	elseif (default_proxy == "v2ray" or default_proxy == "v2ray-vmess" or default_proxy == "v2ray-trojan" or default_proxy == "v2ray-socks") and serversnb > 0 and serversnb > disablednb then
+		--ucic:set("shadowsocks-libev","sss0","disabled","1")
+		ucic:set("xray","main","enabled","0")
+		ucic:set("v2ray","main","enabled","1")
+		if default_proxy == "v2ray" then
+			ucic:set("v2ray","omrout","protocol","vless")
+		elseif default_proxy == "v2ray-vmess" then
+			ucic:set("v2ray","omrout","protocol","vmess")
+		elseif default_proxy == "v2ray-trojan" then
+			ucic:set("v2ray","omrout","protocol","trojan")
+		elseif default_proxy == "v2ray-socks" then
+			ucic:set("v2ray","omrout","protocol","socks")
+		end
+		ucic:foreach("shadowsocks-libev", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-libev",sectionname,"disabled","1")
+		end)
+		ucic:foreach("shadowsocks-rust", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-rust",sectionname,"disabled","1")
+		end)
+	elseif (default_proxy == "xray" or default_proxy == "xray-vless-reality" or default_proxy == "xray-vmess" or default_proxy == "xray-trojan" or default_proxy == "xray-shadowsocks" or default_proxy == "xray-socks") and serversnb > 0 and serversnb > disablednb then
+		--ucic:set("shadowsocks-libev","sss0","disabled","1")
+		ucic:set("v2ray","main","enabled","0")
+		ucic:set("xray","main","enabled","1")
+		if default_proxy == "xray" then
+			ucic:set("xray","omrout","protocol","vless")
+		elseif default_proxy == "xray-vless-reality" then
+			ucic:set("xray","omrout","protocol","vless-reality")
+		elseif default_proxy == "xray-vmess" then
+			ucic:set("xray","omrout","protocol","vmess")
+		elseif default_proxy == "xray-trojan" then
+			ucic:set("xray","omrout","protocol","trojan")
+		elseif default_proxy == "xray-socks" then
+			ucic:set("xray","omrout","protocol","socks")
+		elseif default_proxy == "xray-shadowsocks" then
+			ucic:set("xray","omrout","protocol","shadowsocks")
+		end
+		ucic:foreach("shadowsocks-libev", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-libev",sectionname,"disabled","1")
+		end)
+		ucic:foreach("shadowsocks-rust", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-rust",sectionname,"disabled","1")
 		end)
 	else
 		--ucic:set("shadowsocks-libev","sss0","disabled","1")
 		ucic:set("v2ray","main","enabled","0")
+		ucic:set("xray","main","enabled","0")
 		ucic:foreach("shadowsocks-libev", "server", function(s)
 			local sectionname = s[".name"]
 			ucic:set("shadowsocks-libev",sectionname,"disabled","1")
+		end)
+		ucic:foreach("shadowsocks-rust", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("shadowsocks-rust",sectionname,"disabled","1")
 		end)
 	end
 	ucic:set("openmptcprouter","settings","proxy",default_proxy)
 	ucic:save("openmptcprouter")
 	ucic:save("shadowsocks-libev")
+	ucic:save("shadowsocks-rust")
 	ucic:save("v2ray")
+	ucic:save("xray")
 
 	ucic:foreach("shadowsocks-libev","server", function(s)
 		local sectionname = s[".name"]
 		if sectionname:match("^sss.*") then
 			ucic:delete("shadowsocks-libev",sectionname,"ip")
 			ucic:set("shadowsocks-libev",sectionname,"disabled","1")
+			ucic:delete("openmptcprouter","omr","ss_" .. sectionname)
+		end
+	end)
+	ucic:foreach("shadowsocks-rust","server", function(s)
+		local sectionname = s[".name"]
+		if sectionname:match("^sss.*") then
+			ucic:delete("shadowsocks-rust",sectionname,"ip")
+			ucic:set("shadowsocks-rust",sectionname,"disabled","1")
+			ucic:delete("openmptcprouter","omr","ss_" .. sectionname)
 		end
 	end)
 
@@ -573,20 +822,46 @@ function wizard_add()
 					ucic:set("ubond","general","host",server_ip)
 					ucic:set("v2ray","omrout","s_vmess_address",server_ip)
 					ucic:set("v2ray","omrout","s_vless_address",server_ip)
-					luci.sys.call("uci -q del openvpn.omr.remote")
-					luci.sys.call("uci -q add_list openvpn.omr.remote=" .. server_ip)
+					ucic:set("v2ray","omrout","s_trojan_address",server_ip)
+					ucic:set("v2ray","omrout","s_socks_address",server_ip)
+					ucic:set("xray","omrout","s_vmess_address",server_ip)
+					ucic:set("xray","omrout","s_vless_address",server_ip)
+					ucic:set("xray","omrout","s_vless_reality_address",server_ip)
+					ucic:set("xray","omrout","s_trojan_address",server_ip)
+					ucic:set("xray","omrout","s_socks_address",server_ip)
+					ucic:set("xray","omrout","s_shadowsocks_address",server_ip)
+					ucic:foreach("openvpn","openvpn", function(s)
+						local sectionname = s[".name"]
+						if sectionname:match("^omr.*") then
+							luci.sys.call("uci -q del openvpn." .. sectionname .. ".remote")
+							luci.sys.call("uci -q add_list openvpn." .. sectionname .. ".remote=" .. server_ip)
+						end
+					end)
+					--luci.sys.call("uci -q del openvpn.omr.remote")
+					--luci.sys.call("uci -q add_list openvpn.omr.remote=" .. server_ip)
 					ucic:set("qos","serverin","srchost",server_ip)
 					ucic:set("qos","serverout","dsthost",server_ip)
 					local nbip = 0
 					for _, ssip in pairs(server_ips) do
 						ucic:set("shadowsocks-libev","sss" .. nbip,"server",ssip)
-						if default_proxy == "shadowsocks" and serversnb > disablednb then
+						if default_proxy == "shadowsocks" and serversnb > disablednb and ssip ~= "" then
 							ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","0")
 						end
-						if disableipv6 == "1" and nbip > 0 then
-							break
+						ucic:set("shadowsocks-rust","sss" .. nbip,"server",ssip)
+						if default_proxy == "shadowsocks-rust" and serversnb > disablednb and ssip ~= "" then
+							ucic:set("shadowsocks-rust","sss" .. nbip,"disabled","0")
 						end
 						nbip = nbip + 1
+						if disableipv6 == "1" and nbip > 0 then
+							ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","1")
+							ucic:set("shadowsocks-rust","sss" .. nbip,"disabled","1")
+							break
+						end
+					end
+					if nbip == 1 then
+						--ucic:set("shadowsocks-libev","sss" .. nbip,"server",server_ip)
+						ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","1")
+						ucic:set("shadowsocks-rust","sss" .. nbip,"disabled","1")
 					end
 				end
 				k = k + 1
@@ -606,20 +881,44 @@ function wizard_add()
 				ucic:set("ubond","general","host",server_ip)
 				ucic:set("v2ray","omrout","s_vmess_address",server_ip)
 				ucic:set("v2ray","omrout","s_vless_address",server_ip)
-				luci.sys.call("uci -q del openvpn.omr.remote")
-				luci.sys.call("uci -q add_list openvpn.omr.remote=" .. server_ip)
+				ucic:set("v2ray","omrout","s_trojan_address",server_ip)
+				ucic:set("v2ray","omrout","s_socks_address",server_ip)
+				ucic:set("xray","omrout","s_vmess_address",server_ip)
+				ucic:set("xray","omrout","s_vless_address",server_ip)
+				ucic:set("xray","omrout","s_vless_reality_address",server_ip)
+				ucic:set("xray","omrout","s_trojan_address",server_ip)
+				ucic:set("xray","omrout","s_socks_address",server_ip)
+				ucic:set("xray","omrout","s_shadowsocks_address",server_ip)
+				ucic:foreach("openvpn","openvpn", function(s)
+					local sectionname = s[".name"]
+					if sectionname:match("^omr.*") then
+						luci.sys.call("uci -q del openvpn." .. sectionname .. ".remote")
+						luci.sys.call("uci -q add_list openvpn." .. sectionname .. ".remote=" .. server_ip)
+					end
+				end)
+				--luci.sys.call("uci -q del openvpn.omr.remote")
+				--luci.sys.call("uci -q add_list openvpn.omr.remote=" .. server_ip)
 				ucic:set("qos","serverin","srchost",server_ip)
 				ucic:set("qos","serverout","dsthost",server_ip)
 				local nbip = 0
 				for _, ssip in pairs(server_ips) do
 					ucic:set("shadowsocks-libev","sss" .. nbip,"server",ssip)
-					if default_proxy == "shadowsocks" and serversnb > disablednb then
+					if default_proxy == "shadowsocks" and serversnb > disablednb and ssip ~= "" then
 						ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","0")
+					end
+					ucic:set("shadowsocks-rust","sss" .. nbip,"server",ssip)
+					if default_proxy == "shadowsocks-rust" and serversnb > disablednb and ssip ~= "" then
+						ucic:set("shadowsocks-rust","sss" .. nbip,"disabled","0")
 					end
 					nbip = nbip + 1
 					if disableipv6 == "1" and nbip > 0 then
 						break
 					end
+				end
+				if nbip == 1 then
+				--	ucic:set("shadowsocks-libev","sss" .. nbip,"server",server_ip)
+					ucic:set("shadowsocks-libev","sss" .. nbip,"disabled","1")
+					ucic:set("shadowsocks-rust","sss" .. nbip,"disabled","1")
 				end
 			end
 		end
@@ -634,6 +933,7 @@ function wizard_add()
 	ucic:save("mlvpn")
 	ucic:save("ubond")
 	ucic:save("v2ray")
+	ucic:save("xray")
 	--ucic:commit("mlvpn")
 	ucic:save("dsvpn")
 	--ucic:commit("dsvpn")
@@ -641,50 +941,126 @@ function wizard_add()
 	ucic:save("glorytun-udp")
 	--ucic:commit("glorytun")
 	ucic:save("shadowsocks-libev")
+	ucic:save("shadowsocks-rust")
 	--ucic:commit("shadowsocks-libev")
 
 
 	local encryption = luci.http.formvalue("encryption")
 	if encryption == "none" then
+		ucic:set("openmptcprouter","settings","encryption","none")
 		ucic:set("shadowsocks-libev","sss0","method","none")
 		ucic:set("shadowsocks-libev","sss1","method","none")
-		ucic:set("openvpn","omr","cipher","none")
+		ucic:set("shadowsocks-rust","sss0","method","none")
+		ucic:set("shadowsocks-rust","sss1","method","none")
+		ucic:foreach("openvpn","openvpn", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^omr.*") then
+				ucic:set("openvpn",sectionname,"cipher","none")
+			end
+		end)
+		--ucic:set("openvpn","omr","cipher","none")
 		ucic:set("mlvpn","general","cleartext_data","1")
 		ucic:set("v2ray","omrout","s_vmess_user_security","none")
 		ucic:set("v2ray","omrout","s_vless_user_security","none")
+		ucic:set("v2ray","omrout","s_trojan_user_security","none")
+		ucic:set("v2ray","omrout","s_socks_user_security","none")
+		ucic:set("xray","omrout","s_vmess_user_security","none")
+		ucic:set("xray","omrout","s_vless_user_security","none")
+		ucic:set("xray","omrout","s_vless_reality_user_security","none")
+		ucic:set("xray","omrout","s_trojan_user_security","none")
+		ucic:set("xray","omrout","s_socks_user_security","none")
+		--ucic:set("xray","omrout","s_shadowsocks_method","none")
+		ucic:set("xray","omrout","s_shadowsocks_method","2022-blake3-aes-256-gcm")
 	elseif encryption == "aes-256-gcm" then
+		ucic:set("openmptcprouter","settings","encryption","aes-256-gcm")
 		ucic:set("shadowsocks-libev","sss0","method","aes-256-gcm")
 		ucic:set("shadowsocks-libev","sss1","method","aes-256-gcm")
 		ucic:set("glorytun","vpn","chacha20","0")
 		ucic:set("glorytun-udp","vpn","chacha","0")
-		ucic:set("openvpn","omr","cipher","AES-256-GCM")
+		ucic:foreach("openvpn","openvpn", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^omr.*") then
+				ucic:set("openvpn",sectionname,"cipher","AES-256-GCM")
+			end
+		end)
+		--ucic:set("openvpn","omr","cipher","AES-256-GCM")
 		ucic:set("mlvpn","general","cleartext_data","0")
 		ucic:set("v2ray","omrout","s_vmess_user_security","aes-128-gcm")
 		ucic:set("v2ray","omrout","s_vless_user_security","aes-128-gcm")
+		ucic:set("v2ray","omrout","s_trojan_user_security","aes-128-gcm")
+		ucic:set("v2ray","omrout","s_socks_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vmess_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vless_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vless_reality_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_trojan_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_socks_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_shadowsocks_method","2022-blake3-aes-256-gcm")
+		ucic:set("shadowsocks-rust","sss0","method","2022-blake3-aes-256-gcm")
+		ucic:set("shadowsocks-rust","sss1","method","2022-blake3-aes-256-gcm")
 	elseif encryption == "aes-256-cfb" then
+		ucic:set("openmptcprouter","settings","encryption","aes-256-cfb")
 		ucic:set("shadowsocks-libev","sss0","method","aes-256-cfb")
 		ucic:set("shadowsocks-libev","sss1","method","aes-256-cfb")
 		ucic:set("glorytun","vpn","chacha20","0")
 		ucic:set("glorytun-udp","vpn","chacha","0")
-		ucic:set("openvpn","omr","cipher","AES-256-CFB")
+		ucic:foreach("openvpn","openvpn", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^omr.*") then
+				ucic:set("openvpn",sectionname,"cipher","AES-256-CFB")
+			end
+		end)
+		--ucic:set("openvpn","omr","cipher","AES-256-CFB")
 		ucic:set("mlvpn","general","cleartext_data","0")
 		ucic:set("v2ray","omrout","s_vmess_user_security","aes-128-gcm")
 		ucic:set("v2ray","omrout","s_vless_user_security","aes-128-gcm")
+		ucic:set("v2ray","omrout","s_trojan_user_security","aes-128-gcm")
+		ucic:set("v2ray","omrout","s_socks_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vmess_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vless_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_vless_reality_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_trojan_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_socks_user_security","aes-128-gcm")
+		ucic:set("xray","omrout","s_shadowsocks_method","2022-blake3-aes-256-gcm")
+		ucic:set("shadowsocks-rust","sss0","method","2022-blake3-aes-256-gcm")
+		ucic:set("shadowsocks-rust","sss1","method","2022-blake3-aes-256-gcm")
 	elseif encryption == "chacha20-ietf-poly1305" then
+		ucic:set("openmptcprouter","settings","encryption","chacha20")
 		ucic:set("shadowsocks-libev","sss0","method","chacha20-ietf-poly1305")
 		ucic:set("shadowsocks-libev","sss1","method","chacha20-ietf-poly1305")
 		ucic:set("glorytun","vpn","chacha20","1")
 		ucic:set("glorytun-udp","vpn","chacha","1")
-		ucic:set("openvpn","omr","cipher","AES-256-CBC")
+		ucic:foreach("openvpn","openvpn", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^omr.*") then
+				ucic:set("openvpn",sectionname,"cipher","chacha20-poly1305")
+			end
+		end)
+		--ucic:set("openvpn","omr","cipher","chacha20-poly1305")
 		ucic:set("mlvpn","general","cleartext_data","0")
 		ucic:set("v2ray","omrout","s_vmess_user_security","chacha20-poly1305")
 		ucic:set("v2ray","omrout","s_vless_user_security","chacha20-poly1305")
+		ucic:set("v2ray","omrout","s_trojan_user_security","chacha20-poly1305")
+		ucic:set("v2ray","omrout","s_socks_user_security","chacha20-poly1305")
+		ucic:set("xray","omrout","s_vmess_user_security","chacha20-poly1305")
+		ucic:set("xray","omrout","s_vless_user_security","chacha20-poly1305")
+		ucic:set("xray","omrout","s_vless_reality_user_security","chacha20-poly1305")
+		ucic:set("xray","omrout","s_trojan_user_security","chacha20-poly1305")
+		ucic:set("xray","omrout","s_socks_user_security","chacha20-poly1305")
+		--ucic:set("xray","omrout","s_shadowsocks_method","2022-blake3-chacha20-poly1305")
+		ucic:set("xray","omrout","s_shadowsocks_method","2022-blake3-aes-256-gcm")
+		--ucic:set("shadowsocks-rust","sss0","method","2022-blake3-chacha20-poly1305")
+		--ucic:set("shadowsocks-rust","sss1","method","2022-blake3-chacha20-poly1305")
+		ucic:set("shadowsocks-rust","sss0","method","2022-blake3-aes-256-gcm")
+		ucic:set("shadowsocks-rust","sss1","method","2022-blake3-aes-256-gcm")
+	else
+		ucic:set("openmptcprouter","settings","encryption","other")
 	end
 	ucic:save("openvpn")
 	ucic:save("glorytun")
 	ucic:save("glorytun-udp")
 	ucic:save("shadowsocks-libev")
 	ucic:save("v2ray")
+	ucic:save("xray")
 
 	-- Set ShadowSocks settings
 	local shadowsocks_key = luci.http.formvalue("shadowsocks_key")
@@ -701,24 +1077,72 @@ function wizard_add()
 		ucic:save("shadowsocks-libev")
 		ucic:commit("shadowsocks-libev")
 		if shadowsocks_disable == "1" then
-			luci.sys.call("/etc/init.d/shadowsocks rules_down >/dev/null 2>/dev/null")
+			luci.sys.call("/etc/init.d/shadowsocks-libev rules_down >/dev/null 2>/dev/null")
 		end
 	else
 		if serversnb == 0 then
-			ucic:set("shadowsocks-libev","sss0","disabled",shadowsocks_disable)
-			ucic:set("shadowsocks-libev","sss1","disabled",shadowsocks_disable)
+			ucic:set("shadowsocks-libev","sss0","disabled","1")
+			ucic:set("shadowsocks-libev","sss1","disabled","1")
 		end
 		ucic:set("shadowsocks-libev","sss0","key","")
 		ucic:set("shadowsocks-libev","sss1","key","")
 		ucic:save("shadowsocks-libev")
 		ucic:commit("shadowsocks-libev")
-		luci.sys.call("/etc/init.d/shadowsocks rules_down >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/shadowsocks-libev rules_down >/dev/null 2>/dev/null")
 	end
+	-- Set ShadowSocks 2022 settings
+	local shadowsocks2022_key = luci.http.formvalue("shadowsocks2022_key")
+	if shadowsocks2022_key ~= "" then
+		ucic:set("shadowsocks-rust","sss0","password",shadowsocks2022_key)
+		ucic:set("shadowsocks-rust","sss1","password",shadowsocks2022_key)
+		ucic:set("xray","omrout","s_shadowsocks_password",shadowsocks2022_key)
+		ucic:save("shadowsocks-rust")
+		ucic:commit("shadowsocks-rust")
+		if shadowsocks_disable == "1" then
+			luci.sys.call("/etc/init.d/shadowsocks-rust rules_down >/dev/null 2>/dev/null")
+		end
+	else
+		if serversnb == 0 then
+			ucic:set("shadowsocks-rust","sss0","disabled","1")
+			ucic:set("shadowsocks-rust","sss1","disabled","1")
+		end
+		ucic:set("shadowsocks-rust","sss0","password","")
+		ucic:set("shadowsocks-rust","sss1","password","")
+		ucic:set("xray","omrout","s_shadowsocks_password","")
+		ucic:save("shadowsocks-rust")
+		ucic:commit("shadowsocks-rust")
+		luci.sys.call("/etc/init.d/shadowsocks-rust rules_down >/dev/null 2>/dev/null")
+	end
+
+	-- Enable/disable v2ray/xray udp
+	local v2rayudp = luci.http.formvalue("v2rayudp") or "0"
+	ucic:set("v2ray","main_transparent_proxy","redirect_udp",v2rayudp)
+	ucic:save("v2ray")
+	ucic:commit("v2ray")
+	ucic:set("xray","main_transparent_proxy","redirect_udp",v2rayudp)
+	ucic:save("xray")
+	ucic:commit("xray")
+
 	local v2ray_user = luci.http.formvalue("v2ray_user")
 	ucic:set("v2ray","omrout","s_vmess_user_id",v2ray_user)
 	ucic:set("v2ray","omrout","s_vless_user_id",v2ray_user)
+	ucic:set("v2ray","omrout","s_trojan_user_id",v2ray_user)
+	ucic:set("v2ray","omrout","s_socks_user_id",v2ray_user)
 	ucic:save("v2ray")
 	ucic:commit("v2ray")
+	local xray_user = luci.http.formvalue("xray_user")
+	ucic:set("xray","omrout","s_vmess_user_id",xray_user)
+	ucic:set("xray","omrout","s_vless_user_id",xray_user)
+	ucic:set("xray","omrout","s_vless_reality_user_id",xray_user)
+	ucic:set("xray","omrout","s_trojan_user_id",xray_user)
+	ucic:set("xray","omrout","s_socks_user_id",xray_user)
+	ucic:save("xray")
+	ucic:commit("xray")
+
+	ucic:save("shadowsocks-libev")
+	ucic:commit("shadowsocks-libev")
+	ucic:save("shadowsocks-rust")
+	ucic:commit("shadowsocks-rust")
 
 
 	-- Set Glorytun settings
@@ -781,7 +1205,7 @@ function wizard_add()
 
 	local dsvpn_key = luci.http.formvalue("dsvpn_key")
 	if dsvpn_key ~= "" then
-		ucic:set("dsvpn","vpn","port","65011")
+		ucic:set("dsvpn","vpn","port","65401")
 		ucic:set("dsvpn","vpn","key",dsvpn_key)
 		ucic:set("dsvpn","vpn","localip","10.255.251.2")
 		ucic:set("dsvpn","vpn","remoteip","10.255.251.1")
@@ -828,7 +1252,7 @@ function wizard_add()
 	local ubond_password = luci.http.formvalue("ubond_password")
 	if ubond_password ~= "" then
 		ucic:set("ubond","general","password",ubond_password)
-		ucic:set("ubond","general","firstport","65201")
+		ucic:set("ubond","general","firstport","65251")
 		ucic:set("ubond","general","interface_name","ubond0")
 	else
 		--ucic:set("ubond","general","enable",0)
@@ -838,16 +1262,42 @@ function wizard_add()
 	ucic:commit("ubond")
 
 	if default_vpn == "openvpn" and disablednb ~= serversnb  then
-		ucic:set("openvpn","omr","enabled",1)
-		ucic:set("network","omrvpn","proto","none")
+		if ucic:get("openmptcprouter","settings","openvpn_lb") == "0" then
+			ucic:foreach("openvpn","openvpn", function(s)
+				local sectionname = s[".name"]
+				if sectionname:match("^omr.*") then
+					ucic:set("openvpn",sectionname,"enabled",0)
+					ucic:set("network",sectionname,"proto","none")
+				end
+			end)
+			ucic:set("openvpn","omr","enabled",1)
+		else
+			ucic:foreach("openvpn","openvpn", function(s)
+				local sectionname = s[".name"]
+				if sectionname:match("^omr.*") then
+					ucic:set("openvpn",sectionname,"enabled",1)
+					ucic:set("network",sectionname,"proto","none")
+				end
+			end)
+		--ucic:set("openvpn","omr","enabled",1)
+		end
+		--ucic:set("network","omrvpn","proto","none")
 	else
-		ucic:set("openvpn","omr","enabled",0)
+		ucic:foreach("openvpn","openvpn", function(s)
+			local sectionname = s[".name"]
+			if sectionname:match("^omr.*") then
+				ucic:delete("openvpn",sectionname,"enabled")
+			end
+		end)
+		--ucic:delete("openvpn","omr","enabled")
 	end
 	ucic:save("openvpn")
 	ucic:commit("openvpn")
 
 	ucic:save("v2ray")
 	ucic:commit("v2ray")
+	ucic:save("xray")
+	ucic:commit("xray")
 
 	ucic:save("network")
 	ucic:commit("network")
@@ -866,8 +1316,9 @@ function wizard_add()
 	-- Restart all
 	menuentry = ucic:get("openmptcprouter","settings","menu") or "openmptcprouter"
 	if gostatus == true then
-		luci.sys.call("/etc/init.d/macvlan restart >/dev/null 2>/dev/null")
+		--luci.sys.call("/etc/init.d/macvlan restart >/dev/null 2>/dev/null")
 		luci.sys.call("(env -i /bin/ubus call network reload) >/dev/null 2>/dev/null")
+		luci.sys.call("ip addr flush dev tun0 >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/omr-tracker stop >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/mptcp restart >/dev/null 2>/dev/null")
 		--if openmptcprouter_vps_key ~= "" then
@@ -875,18 +1326,24 @@ function wizard_add()
 		--	luci.sys.call("sleep 2")
 		--end
 		luci.sys.call("/etc/init.d/shadowsocks-libev restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/shadowsocks-rust restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/glorytun restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/glorytun-udp restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/mlvpn restart >/dev/null 2>/dev/null")
-		--luci.sys.call("/etc/init.d/ubond restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/ubond restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/mptcpovervpn restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/openvpn restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/openvpnbonding restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/dsvpn restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/omr-tracker start >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/omr-6in4 restart >/dev/null 2>/dev/null")
-		luci.sys.call("/etc/init.d/mptcpovervpn restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/vnstat restart >/dev/null 2>/dev/null")
 		luci.sys.call("/etc/init.d/v2ray restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/xray restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/sqm restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/omr-bypass restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/sqm-autorate restart >/dev/null 2>/dev/null")
+		luci.sys.call("/etc/init.d/sysntpd restart >/dev/null 2>/dev/null")
 		luci.http.redirect(luci.dispatcher.build_url("admin/system/" .. menuentry:lower() .. "/status"))
 	else
 		luci.http.redirect(luci.dispatcher.build_url("admin/system/" .. menuentry:lower() .. "/wizard"))
@@ -952,9 +1409,35 @@ function settings_add()
 	ucic:set("openmptcprouter","settings","disable_ipv6",disable_ipv6)
 	--local dump = require("luci.util").ubus("openmptcprouter", "disableipv6", { disable_ipv6 = tonumber(disable_ipv6)})
 
+	-- Disable 6in4
+	local disable_6in4 = luci.http.formvalue("enable6in4") or "0"
+	ucic:set("openmptcprouter","settings","disable_6in4",disable_6in4)
+
+	-- Disable ModemManager
+	local disable_modemmanager = luci.http.formvalue("disablemodemmanager") or "0"
+	ucic:set("openmptcprouter","settings","disable_modemmanager",disable_modemmanager)
+	if disable_modemmanager == "1" then
+		luci.sys.exec("/etc/init.d/modemmanager stop")
+	end
+
 	-- Enable/disable external check
 	local externalcheck = luci.http.formvalue("externalcheck") or "1"
 	ucic:set("openmptcprouter","settings","external_check",externalcheck)
+
+	-- Enable/disable OpenVPN multiple clients
+	local openvpnlb = luci.http.formvalue("openvpnlb") or "1"
+	if ucic:get("openmptcprouter","settings","openvpn_lb") ~= openvpnlb then
+		ucic:set("openmptcprouter","settings","openvpn_lb",openvpnlb)
+		ucic:foreach("openmptcprouter", "server", function(s)
+			local sectionname = s[".name"]
+			ucic:set("openmptcprouter",sectionname,"get_config","1")
+		end)
+
+	end
+
+	-- Enable/disable restrict proxy to LAN
+	local restricttolan = luci.http.formvalue("restricttolan") or "0"
+	ucic:set("openmptcprouter","settings","restrict_to_lan",restricttolan)
 
 	-- Enable/disable debug
 	local debug = luci.http.formvalue("debug") or "0"
@@ -972,6 +1455,26 @@ function settings_add()
 	local disablegwping = luci.http.formvalue("disablegwping") or "0"
 	ucic:set("openmptcprouter","settings","disablegwping",disablegwping)
 
+	-- VPS timeout
+	local status_vps_timeout = luci.http.formvalue("status_vps_timeout") or "1"
+	ucic:set("openmptcprouter","settings","status_vps_timeout",status_vps_timeout)
+
+	-- IP timeout
+	local status_getip_timeout = luci.http.formvalue("status_getip_timeout") or "1"
+	ucic:set("openmptcprouter","settings","status_getip_timeout",status_getip_timeout)
+
+	-- Whois timeout
+	local status_whois_timeout = luci.http.formvalue("status_whois_timeout") or "2"
+	ucic:set("openmptcprouter","settings","status_whois_timeout",status_whois_timeout)
+
+	-- Enable/disable loop detection
+	local disableloopdetection = luci.http.formvalue("disableloopdetection") or "0"
+	ucic:set("openmptcprouter","settings","disableloopdetection",disableloopdetection)
+
+	-- Enable/disable http test
+	local disableserverhttptest = luci.http.formvalue("disableserverhttptest") or "0"
+	ucic:set("openmptcprouter","settings","disableserverhttptest",disableserverhttptest)
+
 	-- Enable/disable renaming intf
 	local disableintfrename = luci.http.formvalue("disableintfrename") or "0"
 	ucic:set("openmptcprouter","settings","disableintfrename",disableintfrename)
@@ -981,16 +1484,37 @@ function settings_add()
 	ucic:set("openmptcprouter","settings","defaultgw",disabledefaultgw)
 
 	-- Enable/disable tracebox
-	local tracebox = luci.http.formvalue("tracebox") or "1"
+	local tracebox = luci.http.formvalue("disabletracebox") or "1"
 	ucic:set("openmptcprouter","settings","tracebox",tracebox)
+
+	-- Enable/disable ModemManager
+	local modemmanager = luci.http.formvalue("disablemodemmanager") or "1"
+	ucic:set("openmptcprouter","settings","modemmanager",modemmanager)
 
 	-- Enable/disable server ping
 	local disableserverping = luci.http.formvalue("disableserverping") or "0"
 	ucic:set("openmptcprouter","settings","disableserverping",disableserverping)
 
+	-- Enable/disable multipath check
+	local disablemultipathtest = luci.http.formvalue("disablemultipathtest") or "0"
+	ucic:set("openmptcprouter","settings","disablemultipathtest",disablemultipathtest)
+
 	-- Enable/disable shadowsocks udp
 	local shadowsocksudp = luci.http.formvalue("shadowsocksudp") or "0"
 	ucic:set("openmptcprouter","settings","shadowsocksudp",shadowsocksudp)
+
+	-- Enable/disable v2ray/xray udp
+	local v2rayudp = luci.http.formvalue("v2rayudp") or "0"
+	ucic:set("v2ray","main_transparent_proxy","redirect_udp",v2rayudp)
+	ucic:save("v2ray")
+	ucic:commit("v2ray")
+	ucic:set("xray","main_transparent_proxy","redirect_udp",v2rayudp)
+	ucic:save("xray")
+	ucic:commit("xray")
+
+	-- Enable/disable nDPI
+	local ndpi = luci.http.formvalue("ndpi") or "1"
+	ucic:set("openmptcprouter","settings","ndpi",ndpi)
 
 	-- Enable/disable fast open
 	local disablefastopen = luci.http.formvalue("disablefastopen") or "0"
@@ -1053,11 +1577,22 @@ function settings_add()
 		ucic:set("openmptcprouter","settings","scaling_governor",scaling_governor)
 	end
 
+	-- Enable/disable Qualcomm Shortcut FE
+	local sfe_enabled = luci.http.formvalue("sfe_enabled") or "0"
+	ucic:set("openmptcprouter","settings","sfe_enabled",sfe_enabled)
+	local sfe_bridge = luci.http.formvalue("sfe_bridge") or "0"
+	ucic:set("openmptcprouter","settings","sfe_bridge",sfe_bridge)
+
+	-- Enable/disable SIP ALG
+	local sipalg = luci.http.formvalue("sipalg") or "0"
+	ucic:set("openmptcprouter","settings","sipalg",sipalg)
+
 	ucic:save("openmptcprouter")
 	ucic:commit("openmptcprouter")
 
 	-- Apply all settings
 	luci.sys.call("/etc/init.d/openmptcprouter restart >/dev/null 2>/dev/null")
+	luci.sys.call("/etc/init.d/openmptcprouter-vps set_vps_firewall >/dev/null 2>/dev/null")
 	luci.sys.call("/etc/init.d/omr-6in4 restart >/dev/null 2>/dev/null")
 
 	-- Done, redirect
@@ -1071,7 +1606,7 @@ function update_vps()
 	local update_vps = luci.http.formvalue("flash") or ""
 	if update_vps ~= "" then
 		local ut = require "luci.util"
-		local result = ut.ubus("openmptcprouter", "update_vps", {})
+		local result = ut.ubus("openmptcprouter", "updateVPS", {})
 	end
 	return
 end
@@ -1079,7 +1614,18 @@ end
 function backupgr()
 	local get_backup = luci.http.formvalue("restore") or ""
 	if get_backup ~= "" then
-		luci.sys.call("/etc/init.d/openmptcprouter-vps backup_get >/dev/null 2>/dev/null")
+		local dobackup = 0
+		ucic:foreach("openmptcprouter","server", function(s)
+			servername = s[".name"]
+			local get_selected_backup = luci.http.formvalue(servername .. "") or ""
+			if get_selected_backup ~= "" then
+				dobackup = 1
+				luci.sys.call("/etc/init.d/openmptcprouter-vps backup_get " .. servername .. " " .. get_selected_backup .. ">/dev/null 2>/dev/null")
+			end
+		end)
+		if dobackup == 0 then
+			luci.sys.call("/etc/init.d/openmptcprouter-vps backup_get >/dev/null 2>/dev/null")
+		end
 	end
 	local send_backup = luci.http.formvalue("save") or ""
 	if send_backup ~= "" then
